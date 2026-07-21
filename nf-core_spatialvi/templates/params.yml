@@ -1,0 +1,15 @@
+# params.yml — nf-core:spatialvi
+# Only parameters that DIFFER from the pipeline defaults go here; every key is
+# validated against ../assets/nextflow_schema.json (unknown keys / out-of-enum
+# values are rejected). This pipeline has NO UKDRI house recommendation, and its
+# only required params (input, outdir) are passed as CLI flags in the run script,
+# so this file may be left effectively empty (all defaults).
+#
+# Add non-default values as needed, e.g. (all optional; shown commented out):
+#   spaceranger_reference: /data/references/refdata-gex-GRCm39-2024-A   # default: GRCh38 auto-download
+#   spaceranger_probeset: /data/references/probeset.csv
+#   hd_bin_size: 16                # Visium HD; default 8 (enum: 2, 8, 16)
+#   qc_min_counts: 1000            # default 500
+#   qc_min_genes: 500              # default 250
+#   integration_method: scanorama  # default harmony (enum: harmony, scanorama)
+#   skip_integration: true         # single-sample runs

@@ -1,0 +1,556 @@
+{
+  "description": "CellTypist model list",
+  "last_update": "2026-03-16 15:58:39.812071",
+  "models": [
+    {
+      "filename": "Immune_All_Low.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Pan_Immune_CellTypist/v2/Immune_All_Low.pkl",
+      "version": "v2",
+      "date": "2022-07-16 00:20:42.927778",
+      "details": "immune sub-populations combined from 20 tissues of 18 studies",
+      "No_celltypes": 98,
+      "source": "https://doi.org/10.1126/science.abl5197",
+      "default": true
+    },
+    {
+      "filename": "Immune_All_High.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Pan_Immune_CellTypist/v2/Immune_All_High.pkl",
+      "version": "v2",
+      "date": "2022-07-16 08:53:00.959521",
+      "details": "immune populations combined from 20 tissues of 18 studies",
+      "No_celltypes": 32,
+      "source": "https://doi.org/10.1126/science.abl5197"
+    },
+    {
+      "filename": "Adult_COVID19_PBMC.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/COVID19_PBMC_Wilk/v1/Adult_COVID19_PBMC.pkl",
+      "version": "v1",
+      "date": "2024-06-24 19:37:48.634397",
+      "details": "peripheral blood mononuclear cell types from COVID-19 patients and healthy controls",
+      "No_celltypes": 20,
+      "source": "https://doi.org/10.1038/s41591-020-0944-y"
+    },
+    {
+      "filename": "Adult_CynomolgusMacaque_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Cynomolgus_Hippocampus_Hao/v1/Adult_CynomolgusMacaque_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-15 19:44:09.541019",
+      "details": "cell types from the hippocampus of adult cynomolgus monkeys (Macaca fascicularis)",
+      "No_celltypes": 34,
+      "source": "https://doi.org/10.1038/s41593-022-01073-x"
+    },
+    {
+      "filename": "Adult_Human_MTG.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_MTG_Allen/v1/Adult_Human_MTG.pkl",
+      "version": "v1",
+      "date": "2024-09-05 12:16:32.271311",
+      "details": "cell types and subtypes (10x-based) from the adult human middle temporal gyrus",
+      "No_celltypes": 127,
+      "source": "celltypes.brain-map.org/rnaseq"
+    },
+    {
+      "filename": "Adult_Human_PancreaticIslet.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Pancreas_Tritschler/v1/Adult_Human_PancreaticIslet.pkl",
+      "version": "v1",
+      "date": "2023-09-15 12:01:27.068556",
+      "details": "cell types from pancreatic islets of healthy adult humans",
+      "No_celltypes": 12,
+      "source": "https://doi.org/10.1016/j.molmet.2022.101595"
+    },
+    {
+      "filename": "Adult_Human_PrefrontalCortex.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_PFC_Ma/v1/Adult_Human_PrefrontalCortex.pkl",
+      "version": "v1",
+      "date": "2024-09-05 11:40:55.636137",
+      "details": "cell types and subtypes from the adult human dorsolateral prefrontal cortex",
+      "No_celltypes": 113,
+      "source": "https://doi.org/10.1126/science.abo7257"
+    },
+    {
+      "filename": "Adult_Human_Skin.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Skin_Reynolds/v1/Adult_Human_Skin.pkl",
+      "version": "v1",
+      "date": "2023-09-22 18:13:10.902604",
+      "details": "cell types from human healthy adult skin",
+      "No_celltypes": 34,
+      "source": "https://doi.org/10.1126/science.aba6500"
+    },
+    {
+      "filename": "Adult_Human_Vascular.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Pan_Vas_Barnett/v1/Adult_Human_Vascular.pkl",
+      "version": "v1",
+      "date": "2024-12-19 16:51:45.315630",
+      "details": "vascular populations combined from multiple adult human organs",
+      "No_celltypes": 42,
+      "source": "https://doi.org/10.1038/s41591-024-03376-x"
+    },
+    {
+      "filename": "Adult_Mouse_Gut.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_Gut_Casado/v2/Adult_Mouse_Gut.pkl",
+      "version": "v2",
+      "date": "2022-08-08 05:26:50.850176",
+      "details": "cell types in the adult mouse gut combined from eight datasets",
+      "No_celltypes": 126,
+      "source": "https://doi.org/10.1038/s41586-024-07251-0"
+    },
+    {
+      "filename": "Adult_Mouse_OlfactoryBulb.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_OB_Tepe/v1/Adult_Mouse_OlfactoryBulb.pkl",
+      "version": "v1",
+      "date": "2023-07-22 22:13:33.861503",
+      "details": "cell types from the olfactory bulb of adult mice",
+      "No_celltypes": 40,
+      "source": "https://doi.org/10.1016/j.celrep.2018.11.034"
+    },
+    {
+      "filename": "Adult_Pig_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Pig_Hippocampus_Franjic/v1/Adult_Pig_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-14 21:40:10.051325",
+      "details": "cell types from the adult pig hippocampus",
+      "No_celltypes": 13,
+      "source": "https://doi.org/10.1016/j.neuron.2021.10.036"
+    },
+    {
+      "filename": "Adult_RhesusMacaque_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Rhesus_Hippocampus_Franjic/v1/Adult_RhesusMacaque_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-14 21:47:21.380795",
+      "details": "cell types from the hippocampus of adult rhesus monkeys (Macaca mulatta)",
+      "No_celltypes": 14,
+      "source": "https://doi.org/10.1016/j.neuron.2021.10.036"
+    },
+    {
+      "filename": "Adult_cHSPCs_Illumina.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Adult_cHSPCs_Furer/v1/Adult_cHSPCs_Illumina.pkl",
+      "version": "v1",
+      "date": "2025-09-10 17:01:11.664746",
+      "details": "human circulating hematopoietic stem and progenitor cell types in aging, cytopenia, and myelodysplastic syndrome (Illumina)",
+      "No_celltypes": 20,
+      "source": "https://doi.org/10.1038/s41591-025-03716-5"
+    },
+    {
+      "filename": "Adult_cHSPCs_Ultima.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Adult_cHSPCs_Furer/v1/Adult_cHSPCs_Ultima.pkl",
+      "version": "v1",
+      "date": "2025-09-10 15:52:19.243991",
+      "details": "human circulating hematopoietic stem and progenitor cell types in aging, cytopenia, and myelodysplastic syndrome (Ultima)",
+      "No_celltypes": 20,
+      "source": "https://doi.org/10.1038/s41591-025-03716-5"
+    },
+    {
+      "filename": "Autopsy_COVID19_Lung.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Autopsy_COVID19_Delorey/v1/Autopsy_COVID19_Lung.pkl",
+      "version": "v1",
+      "date": "2022-11-19 12:00:00.583922",
+      "details": "cell types from the lungs of 16 SARS-CoV-2 infected COVID-19 autopsy adult donors",
+      "No_celltypes": 34,
+      "source": "https://doi.org/10.1038/s41586-021-03570-8"
+    },
+    {
+      "filename": "COVID19_HumanChallenge_Blood.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/COVID19_HumanBlood_Dratva/v1/COVID19_HumanChallenge_Blood.pkl",
+      "version": "v1",
+      "date": "2022-09-29 17:40:05.907115",
+      "details": "detailed blood cell states from 16 individuals after being challenged with SARS-CoV-2",
+      "No_celltypes": 83,
+      "source": "https://doi.org/10.1038/s41586-024-07575-x"
+    },
+    {
+      "filename": "COVID19_Immune_Landscape.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/COVID19_Immune_Ren/v1/COVID19_Immune_Landscape.pkl",
+      "version": "v1",
+      "date": "2022-04-08 02:01:02.730893",
+      "details": "immune subtypes from lung and blood of COVID-19 patients and healthy controls",
+      "No_celltypes": 64,
+      "source": "https://doi.org/10.1016/j.cell.2021.01.053"
+    },
+    {
+      "filename": "Cells_Adult_Breast.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Adult_Breast_Kumar/v1/Cells_Adult_Breast.pkl",
+      "version": "v1",
+      "date": "2024-04-20 21:09:27.948338",
+      "details": "cell types from the adult human breast",
+      "No_celltypes": 58,
+      "source": "https://doi.org/10.1038/s41586-023-06252-9"
+    },
+    {
+      "filename": "Cells_Fetal_Lung.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Fetal_Lung_He/v2/Cells_Fetal_Lung.pkl",
+      "version": "v2",
+      "date": "2022-10-15 13:54:37.427721",
+      "details": "cell types from human embryonic and fetal lungs",
+      "No_celltypes": 144,
+      "source": "https://doi.org/10.1016/j.cell.2022.11.005"
+    },
+    {
+      "filename": "Cells_Human_Tonsil.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Tonsil_Badosa/v1/Cells_Human_Tonsil.pkl",
+      "version": "v1",
+      "date": "2024-04-21 17:50:57.165795",
+      "details": "tonsillar cell types from humans (3-65 years)",
+      "No_celltypes": 117,
+      "source": "https://doi.org/10.1016/j.immuni.2024.01.006"
+    },
+    {
+      "filename": "Cells_Intestinal_Tract.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Intestinal_Tract_Elmentaite/v1/Cells_Intestinal_Tract.pkl",
+      "version": "v1",
+      "date": "2021-12-17 17:15:04.575098",
+      "details": "intestinal cells from fetal, pediatric (healthy and Crohn's disease) and adult human gut",
+      "No_celltypes": 134,
+      "source": "https://doi.org/10.1038/s41586-021-03852-1"
+    },
+    {
+      "filename": "Cells_Lung_Airway.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Lung_Airway_Madissoon/v4/Cells_Lung_Airway.pkl",
+      "version": "v4",
+      "date": "2022-09-26 20:32:26.712486",
+      "details": "cell populations from scRNA-seq of five locations of the human lungs and airways",
+      "No_celltypes": 78,
+      "source": "https://doi.org/10.1101/2021.11.26.470108"
+    },
+    {
+      "filename": "Developing_Human_Brain.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Devbrain_Braun/v1/Developing_Human_Brain.pkl",
+      "version": "v1",
+      "date": "2022-10-29 21:02:53.713593",
+      "details": "cell types from the first-trimester developing human brain",
+      "No_celltypes": 129,
+      "source": "https://doi.org/10.1126/science.adf1226"
+    },
+    {
+      "filename": "Developing_Human_Gonads.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Gonads_Alonso/v1/Developing_Human_Gonads.pkl",
+      "version": "v1",
+      "date": "2023-09-16 02:07:24.874009",
+      "details": "cell types of human gonadal and adjacent extragonadal tissue from the first and second trimesters of gestation",
+      "No_celltypes": 53,
+      "source": "https://doi.org/10.1038/s41586-022-04918-4"
+    },
+    {
+      "filename": "Developing_Human_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_DevHIP_Zhong/v1/Developing_Human_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-18 09:28:10.712405",
+      "details": "cell types from the developing human hippocampus",
+      "No_celltypes": 15,
+      "source": "https://doi.org/10.1038/s41586-019-1917-5"
+    },
+    {
+      "filename": "Developing_Human_Organs.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Developing_Human_Yu/v1/Developing_Human_Organs.pkl",
+      "version": "v1",
+      "date": "2023-09-17 13:47:50.974219",
+      "details": "cell types of five endoderm-derived organs in developing humans from 7\u201321 post-conception weeks",
+      "No_celltypes": 27,
+      "source": "https://doi.org/10.1016/j.cell.2021.04.028"
+    },
+    {
+      "filename": "Developing_Human_Thymus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Thymus_Park/v1/Developing_Human_Thymus.pkl",
+      "version": "v1",
+      "date": "2022-12-01 02:50:48.767817",
+      "details": "cell populations in embryonic, fetal, pediatric, and adult stages of the human thymus",
+      "No_celltypes": 55,
+      "source": "https://doi.org/10.1126/science.aay3224"
+    },
+    {
+      "filename": "Developing_Mouse_Brain.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_Devbrain_Manno/v1/Developing_Mouse_Brain.pkl",
+      "version": "v1",
+      "date": "2022-01-25 09:00:56.249989",
+      "details": "cell types from the embryonic mouse brain between gastrulation and birth",
+      "No_celltypes": 174,
+      "source": "https://doi.org/10.1038/s41586-021-03775-x"
+    },
+    {
+      "filename": "Developing_Mouse_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_DevHIP_Joglekar/v1/Developing_Mouse_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-18 22:51:57.960310",
+      "details": "cell types from the mouse hippocampus at postnatal day 7",
+      "No_celltypes": 11,
+      "source": "https://doi.org/10.1038/s41467-020-20343-5"
+    },
+    {
+      "filename": "Fetal_Human_AdrenalGlands.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Fetal_Adrenal_Dong/v1/Fetal_Human_AdrenalGlands.pkl",
+      "version": "v1",
+      "date": "2023-09-17 10:03:32.274480",
+      "details": "cell types of human fetal adrenal glands from 8 to 14 post-conceptional weeks",
+      "No_celltypes": 9,
+      "source": "https://doi.org/10.1016/j.ccell.2020.08.014"
+    },
+    {
+      "filename": "Fetal_Human_Pancreas.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Fetal_Pancreas_Yu/v1/Fetal_Human_Pancreas.pkl",
+      "version": "v1",
+      "date": "2023-09-17 16:29:53.752285",
+      "details": "pancreatic cell types from human embryos at 9-19 weeks post conception",
+      "No_celltypes": 19,
+      "source": "https://doi.org/10.1038/s41422-021-00486-w"
+    },
+    {
+      "filename": "Fetal_Human_Pituitary.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Fetal_Pituitary_Zhang/v1/Fetal_Human_Pituitary.pkl",
+      "version": "v1",
+      "date": "2023-09-17 11:06:13.979445",
+      "details": "cell types of human fetal pituitaries from 7 to 25 weeks postfertilization",
+      "No_celltypes": 14,
+      "source": "https://doi.org/10.1038/s41467-020-19012-4"
+    },
+    {
+      "filename": "Fetal_Human_Retina.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Fetal_Retina_Hu/v1/Fetal_Human_Retina.pkl",
+      "version": "v1",
+      "date": "2023-09-17 09:17:11.379366",
+      "details": "cell types from human fetal neural retina and retinal pigment epithelium",
+      "No_celltypes": 25,
+      "source": "https://doi.org/10.1371/journal.pbio.3000365"
+    },
+    {
+      "filename": "Fetal_Human_Skin.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Skin_Reynolds/v1/Fetal_Human_Skin.pkl",
+      "version": "v1",
+      "date": "2023-09-20 19:14:33.808090",
+      "details": "cell types from developing human fetal skin",
+      "No_celltypes": 14,
+      "source": "https://doi.org/10.1126/science.aba6500"
+    },
+    {
+      "filename": "Healthy_Adult_Heart.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Heart_Kanemaru/v1/Healthy_Adult_Heart.pkl",
+      "version": "v1",
+      "date": "2023-02-27 16:03:27.613149",
+      "details": "cell types from eight anatomical regions of the healthy adult human heart",
+      "No_celltypes": 75,
+      "source": "https://doi.org/10.1038/s41586-023-06311-1"
+    },
+    {
+      "filename": "Healthy_COVID19_PBMC.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/COVID19_PBMC_Haniffa/v1/Healthy_COVID19_PBMC.pkl",
+      "version": "v1",
+      "date": "2022-03-10 05:08:08.224597",
+      "details": "peripheral blood mononuclear cell types from healthy and COVID-19 individuals",
+      "No_celltypes": 51,
+      "source": "https://doi.org/10.1038/s41591-021-01329-2"
+    },
+    {
+      "filename": "Healthy_Human_Liver.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Liver_Guilliams/v1/Healthy_Human_Liver.pkl",
+      "version": "v1",
+      "date": "2023-09-14 12:48:54.179790",
+      "details": "cell types from scRNA-seq and snRNA-seq of the adult human liver",
+      "No_celltypes": 17,
+      "source": "https://doi.org/10.1016/j.cell.2021.12.018"
+    },
+    {
+      "filename": "Healthy_Mouse_Liver.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_Liver_Guilliams/v1/Healthy_Mouse_Liver.pkl",
+      "version": "v1",
+      "date": "2023-07-28 12:16:49.675179",
+      "details": "cell types from scRNA-seq and snRNA-seq of the healthy murine liver",
+      "No_celltypes": 17,
+      "source": "https://doi.org/10.1016/j.cell.2021.12.018"
+    },
+    {
+      "filename": "Human_AdultAged_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Hippocampus_Zhou/v1/Human_AdultAged_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-16 10:03:59.893289",
+      "details": "cell types from the hippocampus of adult and aged humans",
+      "No_celltypes": 15,
+      "source": "https://doi.org/10.1038/s41586-022-04912-w"
+    },
+    {
+      "filename": "Human_Colorectal_Cancer.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Colorectal_Cancer_Lee/v1/Human_Colorectal_Cancer.pkl",
+      "version": "v1",
+      "date": "2024-04-26 20:47:44.844844",
+      "details": "cell types of colon tissues from patients with colorectal cancer",
+      "No_celltypes": 36,
+      "source": "https://doi.org/10.1038/s41588-020-0636-z"
+    },
+    {
+      "filename": "Human_Developmental_Retina.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Fetal_Retina_Sridhar/v1/Human_Developmental_Retina.pkl",
+      "version": "v1",
+      "date": "2023-09-17 20:42:25.314063",
+      "details": "cell types from human fetal retina",
+      "No_celltypes": 16,
+      "source": "https://doi.org/10.1016/j.celrep.2020.01.007"
+    },
+    {
+      "filename": "Human_Embryonic_YolkSac.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_YolkSac_Goh/v1/Human_Embryonic_YolkSac.pkl",
+      "version": "v1",
+      "date": "2023-09-14 17:32:58.768364",
+      "details": "cell types of the human yolk sac from 4-8 post-conception weeks",
+      "No_celltypes": 49,
+      "source": "https://doi.org/10.1126/science.add7564"
+    },
+    {
+      "filename": "Human_Endometrium_Atlas.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Endometrium_Mareckova/v1/Human_Endometrium_Atlas.pkl",
+      "version": "v1",
+      "date": "2025-01-09 15:43:11.091556",
+      "details": "endometrial cell types integrated from seven datasets across the menstrual cycle",
+      "No_celltypes": 36,
+      "source": "https://doi.org/10.1038/s41588-024-01873-w"
+    },
+    {
+      "filename": "Human_IPF_Lung.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/IPF_HumanLung_Adams/v1/Human_IPF_Lung.pkl",
+      "version": "v1",
+      "date": "2022-11-16 03:08:53.630039",
+      "details": "cell types from idiopathic pulmonary fibrosis, chronic obstructive pulmonary disease, and healthy lungs of adult humans",
+      "No_celltypes": 38,
+      "source": "https://doi.org/10.1126/sciadv.aba1983"
+    },
+    {
+      "filename": "Human_Longitudinal_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Hippocampus_Ayhan/v1/Human_Longitudinal_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-14 12:59:10.144650",
+      "details": "cell types from the adult human anterior and posterior hippocampus",
+      "No_celltypes": 24,
+      "source": "https://doi.org/10.1016/j.neuron.2021.05.003"
+    },
+    {
+      "filename": "Human_Lung_Atlas.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Lung_Sikkema/v2/Human_Lung_Atlas.pkl",
+      "version": "v2",
+      "date": "2023-05-17 19:51:55.661237",
+      "details": "integrated Human Lung Cell Atlas (HLCA) combining multiple datasets of the healthy respiratory system",
+      "No_celltypes": 61,
+      "source": "https://doi.org/10.1038/s41591-023-02327-2"
+    },
+    {
+      "filename": "Human_PF_Lung.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/PF_HumanLung_Habermann/v1/Human_PF_Lung.pkl",
+      "version": "v1",
+      "date": "2022-11-16 11:53:12.984520",
+      "details": "cell types from different forms of pulmonary fibrosis lungs of adult humans",
+      "No_celltypes": 31,
+      "source": "https://doi.org/10.1126/sciadv.aba1972"
+    },
+    {
+      "filename": "Human_Placenta_Decidua.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Placenta_VentoTormo/v1/Human_Placenta_Decidua.pkl",
+      "version": "v1",
+      "date": "2024-06-24 12:24:39.703109",
+      "details": "cell types from first-trimester human placentas with matched maternal blood and decidua",
+      "No_celltypes": 32,
+      "source": "https://doi.org/10.1038/s41586-018-0698-6"
+    },
+    {
+      "filename": "Lethal_COVID19_Lung.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Lethal_COVID19_Melms/v1/Lethal_COVID19_Lung.pkl",
+      "version": "v1",
+      "date": "2022-11-16 15:38:16.170461",
+      "details": "cell types from the lungs of individuals who died of COVID-19 and control individuals",
+      "No_celltypes": 41,
+      "source": "https://doi.org/10.1038/s41586-021-03569-1"
+    },
+    {
+      "filename": "Mouse_Dendritic_Subtypes.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_DC_Baber/v1/Mouse_Dendritic_Subtypes.pkl",
+      "version": "v1",
+      "date": "2025-08-12 18:05:20.370475",
+      "details": "dendritic cell subtypes integrated from 9 datasets across murine spleen, bone marrow, blood, and lung tissue",
+      "No_celltypes": 10,
+      "source": "https://doi.org/10.1111/imr.70077"
+    },
+    {
+      "filename": "Mouse_Dentate_Gyrus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_DG_Hochgerner/v1/Mouse_Dentate_Gyrus.pkl",
+      "version": "v1",
+      "date": "2023-07-14 20:03:58.410321",
+      "details": "cell types from the dentate gyrus in perinatal, juvenile, and adult mice",
+      "No_celltypes": 24,
+      "source": "https://doi.org/10.1038/s41593-017-0056-2"
+    },
+    {
+      "filename": "Mouse_Isocortex_Hippocampus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_IsocortexHPF_Yao/v1/Mouse_Isocortex_Hippocampus.pkl",
+      "version": "v1",
+      "date": "2023-07-16 14:42:07.696736",
+      "details": "cell types from the adult mouse isocortex (neocortex) and hippocampal formation",
+      "No_celltypes": 42,
+      "source": "https://doi.org/10.1016/j.cell.2021.04.021"
+    },
+    {
+      "filename": "Mouse_Postnatal_DentateGyrus.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Mouse_DG_Hochgerner/v1/Mouse_Postnatal_DentateGyrus.pkl",
+      "version": "v1",
+      "date": "2023-07-21 23:03:32.480446",
+      "details": "cell types from the mouse dentate gyrus in postnatal days 12-35",
+      "No_celltypes": 22,
+      "source": "https://doi.org/10.1038/s41593-017-0056-2"
+    },
+    {
+      "filename": "Mouse_Whole_Brain.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Adult_MouseBrain_Yao/v1/Mouse_Whole_Brain.pkl",
+      "version": "v1",
+      "date": "2024-04-30 17:19:37.721313",
+      "details": "cell types from the whole adult mouse brain",
+      "No_celltypes": 334,
+      "source": "https://doi.org/10.1038/s41586-023-06812-z"
+    },
+    {
+      "filename": "Nuclei_Human_InnerEar.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Human_Ear_Valk/v1/Nuclei_Human_InnerEar.pkl",
+      "version": "v1",
+      "date": "2025-12-02 22:12:13.925426",
+      "details": "cell types from human inner ear at fetal age weeks 7.5 and 9.2 as well as adult",
+      "No_celltypes": 18,
+      "source": "https://doi.org/10.1016/j.celrep.2023.112623"
+    },
+    {
+      "filename": "Nuclei_Lung_Airway.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Lung_Airway_Madissoon/v4/Nuclei_Lung_Airway.pkl",
+      "version": "v4",
+      "date": "2022-09-27 01:30:38.635174",
+      "details": "cell populations from snRNA-seq of five locations of the human lungs and airways",
+      "No_celltypes": 78,
+      "source": "https://doi.org/10.1101/2021.11.26.470108"
+    },
+    {
+      "filename": "PaediatricAdult_COVID19_Airway.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/PaediatricAdult_COVID19_Yoshida/v1/PaediatricAdult_COVID19_Airway.pkl",
+      "version": "v1",
+      "date": "2025-10-14 23:14:36.927842",
+      "details": "cell types in the airway of paediatric and adult patients with COVID-19 and healthy controls",
+      "No_celltypes": 59,
+      "source": "https://doi.org/10.1038/s41586-021-04345-x"
+    },
+    {
+      "filename": "PaediatricAdult_COVID19_PBMC.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/PaediatricAdult_COVID19_Yoshida/v1/PaediatricAdult_COVID19_PBMC.pkl",
+      "version": "v1",
+      "date": "2025-10-15 00:51:41.857714",
+      "details": "peripheral blood mononuclear cell types of paediatric and adult patients with COVID-19 and healthy controls",
+      "No_celltypes": 42,
+      "source": "https://doi.org/10.1038/s41586-021-04345-x"
+    },
+    {
+      "filename": "Pan_Fetal_Human.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Pan_Fetal_Suo/v2/Pan_Fetal_Human.pkl",
+      "version": "v2",
+      "date": "2022-04-23 11:40:27.484223",
+      "details": "stromal and immune populations from the human fetus",
+      "No_celltypes": 138,
+      "source": "https://doi.org/10.1126/science.abo0510"
+    },
+    {
+      "filename": "Thymus_Allograft_PBMC.pkl",
+      "url": "https://celltypist.cog.sanger.ac.uk/models/Thymus_Transplant_Suo/v1/Thymus_Allograft_PBMC.pkl",
+      "version": "v1",
+      "date": "2026-03-14 04:25:02.226899",
+      "details": "cell types from cultured, transplanted and control thymus tissue, patient-derived longitudinal PBMC, and control PBMC",
+      "No_celltypes": 82,
+      "source": "TBD"
+    }
+  ]
+}
