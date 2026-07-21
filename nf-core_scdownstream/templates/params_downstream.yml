@@ -1,0 +1,6 @@
+# params.yml — nf-core:scdownstream (entry: downstream)
+# Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
+name: scdownstream
+species: mouse
+selected_clustering: leiden_1.0
+celltypist_model: Mouse_Whole_Brain

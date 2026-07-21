@@ -1,0 +1,5 @@
+# params.yml — nf-core:scrnaseq
+# Only parameters that differ from the pipeline defaults (validated against
+# ../assets/nextflow_schema.json). Genome fasta + gtf are filled from --species
+# (mouse|human) by build_job.py, or set explicitly with --set fasta=... --set gtf=...
+aligner: cellranger                     # recommended (default: simpleaf)

@@ -1,0 +1,2 @@
+Before writing any API code or skills, read the DESIGN.md file. This is the **single source of truth** for how skills, templates, and Python API code are built in this repository. Read it before authoring or modifying any skill or API script, and adhere to its conventions for every structural decision.
+Never commit and push changes into the remote `main` branch. Always use the `claude` branch or a custom feature branch if the user asked for it. Pull requests will be created by the user.

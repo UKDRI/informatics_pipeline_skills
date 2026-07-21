@@ -1,0 +1,8 @@
+# params.yml — nf-core:differentialabundance (UKDRI fork, dev_ukdri @ 163d07f)
+# Only parameters that differ from the pipeline defaults (validated against
+# ../assets/nextflow_schema.json). Edit the paths/values below, or override with --set.
+# NOTE: --input (the observations samplesheet) and --outdir are CLI flags in the
+# run script, NOT here. study_type defaults to 'rnaseq' so it is omitted.
+contrasts: /data/$USER/PROJECT/contrasts.csv    # CSV: variable,reference,target,blocking
+matrix: /data/$USER/PROJECT/matrix.tsv          # TSV abundance matrix (features x samples)
+study_name: my_study                            # identifier for results (default: study)
