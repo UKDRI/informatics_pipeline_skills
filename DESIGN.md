@@ -4,17 +4,28 @@
 
 ## 1. Purpose & scope
 
-`informatics_pipeline_skills` is a collection of Claude Code **skills**, one per Nextflow
-nf-core-style pipeline. Each skill helps a user assemble the artifacts needed to run one pipeline
-job on the SLURM cluster:
+`informatics_pipeline_skills` is a collection of Claude Code **skills**. It holds two kinds:
 
-- a **SLURM job bash script** (an edited copy of the pipeline's template),
-- a **`params.yml`** file capturing the pipeline parameters that differ from defaults, and
-- *optionally*, a **custom process-resource config** (`-c custom.config`, §4.6) when the run needs
-  non-default CPUs/memory/time.
+- **Pipeline skills** — one per Nextflow nf-core-style pipeline. Each helps a user assemble the
+  artifacts needed to run one pipeline job on the SLURM cluster:
+  - a **SLURM job bash script** (an edited copy of the pipeline's template),
+  - a **`params.yml`** file capturing the pipeline parameters that differ from defaults, and
+  - *optionally*, a **custom process-resource config** (`-c custom.config`, §4.6) when the run needs
+    non-default CPUs/memory/time.
+- **One operations skill — `slurm`** (§9) — which transfers those artifacts **and the run's input data**
+  to the HPC, submits jobs (subject to a 100-job cap), reports job and pipeline status, cancels a job,
+  and removes an allow-listed intermediate artifact on request. It also carries a small job template for
+  unpacking compressed input archives on the cluster.
 
-**The repository never runs a pipeline.** It only *generates* these artifacts. Execution happens
-later, by the user, on the cluster via `sbatch`.
+**A pipeline skill never executes a pipeline.** It only *generates* the artifacts above, and never
+shells out to `sbatch`, `ssh`, or `scp` itself. **The `slurm` skill (§9) is what actually starts a
+pipeline run**, by submitting the job script a pipeline skill produced; it also handles transfer,
+monitoring, cancellation, and cleanup. The user invokes it separately once the artifacts exist — or
+simply runs `sbatch` on the cluster by hand.
+
+Because the `slurm` skill runs real commands on the cluster as the user, it is bound by the safety
+contract in §9: credentials are always asked for and never inferred, passwords are never used, and no
+file or folder is created, overwritten, or deleted without the user's permission.
 
 Pipelines covered:
 
@@ -34,7 +45,7 @@ Pipelines covered:
 Each pipeline lives in its own top-level folder. The folder name is the pipeline id with the
 colon replaced by an underscore (see the table in §8).
 
-Canonical per-skill structure:
+Canonical **pipeline**-skill structure:
 
 ```
 <pipeline_folder>/
@@ -77,11 +88,32 @@ Rules:
 - The seeded example `nf-core_rnaseq/templates/run_nfcore_rnaseq.sh` is the reference template
   that all conventions in §4 are derived from.
 
+### The `slurm` folder — the one exception
+
+The structure above describes **pipeline** skills. The `slurm` operations skill (§9) is what actually
+**starts the pipeline runs** — it submits the job scripts the pipeline skills generated — but it is not
+tied to any one pipeline and writes no `params.yml`, so it has **no pinned pipeline `assets/`** (no
+`nextflow_schema.json`, `nextflow.config`, or `base.config`: there is no single parameter set for it to
+validate against). It does ship **one** job template of its own, for unpacking compressed input data on
+the cluster (§9.4.5):
+
+```
+slurm/
+├── SKILL.md                 # follows §9, not the §3 pipeline-skill section order
+├── templates/
+│   └── run_uncompress.sh    # SLURM job: unzip / tar -xzf an archive on the HPC (§9.4.5)
+└── scripts/
+    └── slurm_ops.py         # subcommands: transfer | submit | job_status | cancel | cleanup (§9.4)
+```
+
+Like any template (§2), `run_uncompress.sh` is **copied and edited** per run, never mutated in place.
+
 ---
 
 ## 3. SKILL.md anatomy
 
-Every skill folder contains a `SKILL.md` with YAML frontmatter followed by instructions.
+Every skill folder contains a `SKILL.md` with YAML frontmatter followed by instructions. The section
+order below is the **pipeline**-skill layout; the `slurm` skill's `SKILL.md` follows §9 instead.
 
 **Frontmatter (required):**
 
@@ -106,7 +138,10 @@ description: >-
    user wants non-default resources.
 5. **Fill the SLURM template** — copy `templates/run_<pipeline>.sh`, replace placeholders (§4), and
    add `-c custom.config` only if one was generated.
-6. **Hand back** — tell the user the final file paths and how to submit (`sbatch run_<pipeline>.sh`).
+6. **Hand back** — tell the user the final file paths, and point them at the **`slurm` skill** (§9)
+   to transfer the files to the HPC and submit the job. Running `sbatch run_<pipeline>.sh` on the
+   cluster by hand stays an equally valid route — say so, and never submit the job yourself from a
+   pipeline skill (§1).
 
 **Convention:** a skill always **edits a copy** of the template into the user's working area; it
 does not modify the file under `templates/`.
@@ -221,6 +256,17 @@ Allowed on the command line (and only these, plus the optional `-c`, §4.6, and 
 
 Anything else (genome, gtf, aligner, protocol, feature flags, …) belongs in `params.yml` (§5).
 
+**Relative paths — where the job must be submitted from.** `-params-file params.yml` is a **relative**
+path, as are `-c custom.config` (§4.6) and §4.8's `cp *.sh` / `rm -rf work`. Three consequences that
+every skill has to respect:
+
+- the job script, its `params.yml` (or `params_<entry>.yml`), and any `custom.config` must sit **in the
+  same directory** — so `transfer` pushes them to one destination (§9.4.0);
+- the job must be **submitted from that directory** (`cd <run dir> && sbatch run_<pipeline>.sh`), or
+  Nextflow will not find the params file — this is what `slurm submit` does (§9.4);
+- that directory is the job's working directory, where `work/`, `.nextflow/`, `.nextflow.log` and the
+  SLURM `.out` are created — which is why §9.5 reads `WorkDir` rather than assuming `$resdir`.
+
 ### 4.6 Optional custom process-resource config (`-c`)
 
 **Optional — omit entirely when the pipeline's default resources are fine; it is not part of every
@@ -300,6 +346,13 @@ cp *.out $resdir/
 rm -rf work        # clean the Nextflow workdir
 echo "ALL DONE."
 ```
+
+This `rm -rf work` is **inside the job script**: it runs on the cluster, in the job's own working
+directory, on a relative path, as part of a script the user submitted. It stays exactly as written.
+It is *not* the same thing as the `slurm` skill's `cleanup` subcommand (§9.4), which is an
+interactive remote removal — that one always names one explicit absolute path and is bound by both the
+§9.3 path guard and the §9.4.1 allow-list (which is what makes `work`, `out`/`outs`, `.nextflow`, and
+the bulk input/object files removable and everything else not).
 
 ---
 
@@ -472,6 +525,9 @@ curl -L https://celltypist.cog.sanger.ac.uk/models/models.json \
   pipeline expects (e.g. rnaseq: `sample,fastq_1,fastq_2,strandedness`).
 - The skill does not fabricate a samplesheet silently; if one is missing, it directs the user to
   generate it first.
+- Getting the samplesheet, the other per-run text artifacts, **and the input data** onto the cluster is
+  the `slurm` skill's `transfer` step — §9.4.0 lists what that covers. Compressed inputs are unpacked on
+  the cluster by the job in §9.4.5.
 
 ---
 
@@ -520,7 +576,12 @@ curl -L https://celltypist.cog.sanger.ac.uk/models/models.json \
     `assets/nextflow_schema.json`; downloading and refreshing the assets is a separate setup step (§5),
     performed by the skill author, not the script. Sample-data retrieval is the job of the
     dedicated data skills.
-  - Writes outputs into the skill's `templates/` area (or a user-specified path), never elsewhere.
+  - Writes its generated files to the **user-specified destination** (`--dest`), and reads the shipped
+    `templates/` copies without mutating them (§2, §3). It writes nowhere else.
+
+The rules in this section govern the **pipeline** skills. The `slurm` skill's API keeps most of them
+but necessarily departs on two (it makes remote calls, and its effects are not files) — the deltas are
+spelled out in §9.6.
 
 ---
 
@@ -541,6 +602,11 @@ Rule: folder = pipeline id with `:` → `_`; job script = `run_` + folder name w
 `-` normalized to `_` (see `run_nfcore_rnaseq.sh`). **Multi-entry pipelines** (§4.7) append the
 entry name: `run_<folder>_<entry>.sh`, each paired with `params_<entry>.yml`.
 
+The **operations skill** is not a pipeline, so that rule does not apply to it: its folder is simply
+`slurm`, and it ships no pipeline job script and no `params.yml`. Its one template is the
+pipeline-independent `templates/run_uncompress.sh` (§2, §9.4.5) — named for what the job does, since
+there is no pipeline id to derive a name from.
+
 **Substantially modified pipelines.** `nf-core:differentialabundance` and `nf-core:scdownstream`
 diverge from upstream nf-core — their `main.nf` paths and parameter sets are **not** the stock
 nf-core ones. Their `SKILL.md` **must** document the deltas from upstream (renamed/added/removed
@@ -554,3 +620,438 @@ It also stores `assets/celltypist_models.json` (the CellTypist model list); its 
 value is checked against that list — accepting a known model name or a custom-model file path,
 warning otherwise — per §7. Its `SKILL.md` carries prose custom-config recommendations (§4.6),
 e.g. bump process memory to `225.GB` for datasets exceeding 250,000 cells.
+
+---
+
+## 9. The `slurm` skill — submission, monitoring, and remote access
+
+### 9.1 Purpose
+
+`slurm` is the repository's single **operations skill** (§1) and the **only** place in the repo that
+touches the cluster. It is the only skill permitted to run `ssh`, `scp`/`rsync`, `sbatch`, `squeue`,
+`sacct`, `scontrol`, `scancel`, or `rm` against the HPC. Pipeline skills generate artifacts and stop (§1, §3 step 6);
+`slurm` takes it from there:
+
+- **`transfer`** — push the generated files **and the run's input data** to the HPC (§9.4.0),
+- **`submit`** — submit the job script with `sbatch`,
+- **`job_status`** — report the SLURM state and where the pipeline currently is,
+- **`cancel`** — cancel one job by job id with `scancel`,
+- **`cleanup`** — remove one explicitly named path on request, restricted to the allow-listed
+  artifact kinds in §9.4.1.
+
+It also ships one job template of its own, `templates/run_uncompress.sh`, for unpacking a `.zip` or
+`.tar.gz` input archive on the cluster (§9.4.5) — submitted through `submit` like any other job.
+
+**Every SLURM and SSH command is handled with extreme care.** The rules in §9.2 and §9.3 are hard
+constraints, not advice: they apply to every subcommand, on every invocation, with no exceptions and
+no "the user probably meant" shortcuts. When a rule below and a user request conflict, the rule wins
+and the reason is stated plainly to the user.
+
+### 9.2 Credentials — always asked, never inferred
+
+- **Always ask the user for the `username` and the `hostname`.** Every invocation, for every
+  subcommand. **Never infer or guess them** — not from `$USER`/`whoami`, `~/.ssh/config`, shell
+  history, an earlier session, `git config`, the user's email address, a hostname in the wiki, or a
+  path seen in this repo or in a samplesheet. The skill ships **no default user and no default host**.
+- **Never use a password.** No password prompt, no password as a CLI argument, no `sshpass`, no
+  password read from a file or environment variable, no interactive keyboard-interactive fallback.
+  Key-based authentication only.
+- **Passwordless SSH is the user's responsibility.** The user configures it *before* using this skill.
+  It is **not** the skill's job: it never creates, edits, copies, or inspects SSH keys,
+  `~/.ssh/config`, `known_hosts`, or `authorized_keys`, never runs `ssh-keygen` or `ssh-copy-id`, and
+  never attempts to set up or repair key auth. If a connection fails for an authentication reason,
+  report the failure plainly, tell the user to configure passwordless SSH to that host, and **stop** —
+  do not retry with another method.
+- Credentials are for the current invocation only: never written to a file, a config, or a log, and
+  never persisted across sessions.
+
+### 9.3 Path safety — the guard shared by every subcommand
+
+A remote path may only be used when **all** of these hold:
+
+1. **Absolute** — no relative path, no `~`, no unexpanded `$VAR` left in it.
+2. **Inside one of the user's own standard directories**, i.e. it starts with one of the
+   **user-directory prefixes** below, with `<username>` being exactly the username the user gave
+   (§9.2). A path that does not contain that username as a path component is **rejected**: it points
+   outside the user's own area. Always check this before the path is used in any command.
+3. **Below the top of the hierarchy** — never operate *on* a user directory itself or on any root
+   above it. The target must sit **at least one level below** the user-directory prefix.
+4. **Literal — no wildcards or globs** — never `*`, `?`, `[...]`, or brace expansion in a path.
+
+The guard applies identically to **all** the standard user directories — it is not specific to
+`/data`:
+
+| User-directory prefix | Allowed target (example) | Always rejected |
+|---|---|---|
+| `/data/<username>` | `/data/<username>/project_1` | `/data/<username>`, `/data` |
+| `/nfsdata/<username>` | `/nfsdata/<username>/project_1` | `/nfsdata/<username>`, `/nfsdata` |
+| `/home/<username>` | `/home/<username>/project_1` | `/home/<username>`, `/home` |
+| `/shared/home/<username>` | `/shared/home/<username>/project_1` | `/shared/home/<username>`, `/shared/home`, `/shared` |
+| `/scratch/<username>` | `/scratch/<username>/project_1` | `/scratch/<username>`, `/scratch` |
+
+A path under any other root (a shared project area, another user's directory, `/tmp`, `/nfsdata`
+software trees such as `/nfsdata/scripts` or `/nfsdata/apptainer`, `/` itself) is **outside the
+guard** — refuse it and ask the user for a path under one of the prefixes above. The prefix list is a
+constant in `slurm_ops.py`; extend it there, not by loosening the check.
+
+Destruction and mutation rules layered on top of the guard:
+
+- **Never run `rm -r *` or `rm -rf *`.** Never any `rm` with a glob, a relative path, or a bare `.`.
+  A removal always names **one explicit full path**, e.g.
+  `rm -rf /data/<username>/project_1/nfcore/scrnaseq/work`.
+- **Never delete, overwrite, or create a file or folder without the user's permission.** Show the
+  exact command and the exact absolute target, then get an explicit go-ahead. This applies to
+  *creating* a remote destination directory just as much as to removing one — do not `mkdir -p`
+  silently.
+- **`transfer` never silently overwrites.** Check whether the remote file exists and ask before
+  replacing it.
+- Quote and escape every remote argument so a path cannot be re-split or re-expanded by the remote
+  shell (see §9.6).
+- When a path fails the guard, refuse the operation, name which check it failed, and ask the user for
+  a conforming path. Never "fix" a path by appending or trimming components on your own.
+
+### 9.4 The five subcommands
+
+One script, `scripts/slurm_ops.py`, with five `argparse` subcommands, so the credential prompt (§9.2)
+and the path guard (§9.3) live in one place instead of being duplicated. All five take `--user` and
+`--host` (§9.2).
+
+| Subcommand | Does | Key rules |
+|---|---|---|
+| `transfer` | **Push only** (local → HPC): the run's text artifacts *and* its input data — see §9.4.0 for the list. `--print-only` prints the `rsync` command for the user to run instead of pushing | §9.3 guard on the remote directory; ask before creating it; ask before overwriting any existing remote file; **never pulls anything back** from the HPC |
+| `submit` | `sbatch <script>` in the remote run directory | **Pre-flight the 100-job limit with `squeue -u` and refuse if the user is at the cap** (§9.4.3); after submission, **report the folder on the HPC and the job id** to the user — both, explicitly |
+| `job_status` | `sacct` / `scontrol show job <jobid>` | Report the state as one of **pending, running, complete, fail, node_fail**, plus the current pipeline step (§9.5) |
+| `cancel` | `scancel <jobid>` | One job id, never a mass cancel; confirm first; afterwards **suggest** a `cleanup` of that run's directory (§9.4.4) |
+| `cleanup` | `rm -rf <one explicit absolute path>` | §9.3 guard **and** the §9.4.1 allow-list — the target's own name must be a removable kind; the path comes from the user via `--path`; show the target (`ls`, `du -sh`) and require explicit confirmation before removing |
+
+**`transfer`** moves a run's text artifacts **and its input data** onto the cluster (§9.4.0). It is
+**push-only in direction, not in scope**: it never fetches results, logs, or reports back to the local
+machine — retrieval is a printed `rsync` command the user runs themselves (§9.4.2). A user who prefers
+to run the upload themselves gets the push command printed instead (`--print-only`, §9.4.0).
+
+**`submit`** always `cd`s into the directory holding the job script and runs `sbatch` **from there**,
+because the script's `-params-file params.yml` and `-c custom.config` are relative paths (§4.5). Refuse
+to submit if the params file the script names is not present in that directory — the run would fail
+minutes later with a confusing Nextflow error. That directory is also the job's `WorkDir`, so it is
+where `work/`, `.nextflow/`, `.nextflow.log` and the SLURM `.out` appear (§9.5).
+
+**`cleanup`** takes an explicit full path under the user's project, subject to the whole of §9.3 under
+**any** of the user-directory prefixes there — **and** to the allow-list in §9.4.1. So a path is only
+removable when it *both* sits inside the user's own area and *is* one of the intermediate/regenerable
+artifact kinds the pipeline skills produce. Any user directory itself (`/data/<username>`,
+`/scratch/<username>`, `/shared/home/<username>`, …), any root above one (`/data`, `/scratch`,
+`/shared/home`, …), a relative path, and anything containing a `*` remain hard rejects regardless of
+the allow-list. The path is always given by the user; never widen it, and never delete a sibling or
+parent "while we're there".
+
+#### 9.4.0 What `transfer` pushes — the artifact list
+
+Everything a pipeline entry point needs to run: the per-run text artifacts the pipeline skills generate
+or expect (§3, §5, §6) **and** the input data itself.
+
+**Per-run text artifacts**, for the pipelines in §8:
+
+| Artifact | Produced by / required by |
+|---|---|
+| `run_*.sh` — including `run_<folder>_<entry>.sh` (§4.7) | every pipeline skill (§4) |
+| `params.yml`, or `params_<entry>.yml` per entry point | every pipeline skill (§5) |
+| `custom.config` | when process resources were tuned (§4.6) |
+| `samplesheet.csv` — the `--input` sheet, any column layout (§6) | rnaseq, scrnaseq, spatialvi, scdownstream `qc_clustering`, differentialabundance (its *observations* sheet) |
+| `contrasts.csv` — the contrasts sheet (`variable,reference,target,blocking`) | differentialabundance, referenced from `params.yml` as `contrasts` |
+| the **`matrix` TSV** — abundance matrix (features × samples) | differentialabundance, referenced from `params.yml` as `matrix` |
+| `*.sdrf.tsv` — the SDRF sample table (**not** a CSV samplesheet) | quantmsdiann, its `--input` |
+| `metadata.tsv` | optional; the skills read it *locally* to infer species (§5), so push it only if the user wants it stored beside the run |
+
+**Input data.** `transfer` also pushes the data a pipeline entry point consumes — essentially anything
+in the §6 input chain that the user already holds locally:
+
+| Kind | Examples / consumed by |
+|---|---|
+| Sequencing reads | `fastq` directories and FASTQ files; `sra` download directories |
+| Aligner/counter outputs | Cell Ranger and Space Ranger **`outs` directories** (scrnaseq output, spatialvi `spaceranger_dir` input) |
+| Proteomics raw data | `*.raw` files, `*.d/` directories (quantmsdiann, referenced from its `*.sdrf.tsv`) |
+| Archives | `*.tar.gz`, `*.zip` — unpack them on the cluster with the job in §9.4.5 |
+| Analysis objects | `*.rds`, `*.pkl`, `*.h5ad` (e.g. a scdownstream `--base_adata`, or per-sample matrices in a samplesheet) |
+| Tables | any `*.csv` / `*.tsv` — samplesheets, contrasts, matrices, SDRF, metadata |
+
+- **Names are the real ones.** `contrasts.csv` is plural — it matches the pipeline's `contrasts`
+  parameter; the quantmsdiann input must end `.sdrf.tsv`. Do not "tidy" a filename in transit: a path
+  written into `params.yml` must still resolve on the cluster after the push.
+- **Use `rsync` for data, not `scp`.** Directories and multi-GB files go with
+  `rsync -avh` (add `-P` for `--partial --progress`, so an interrupted push resumes instead of
+  restarting). Preserve the directory structure a samplesheet expects — a Cell Ranger `outs` tree or a
+  `.d/` directory is only valid as a whole.
+- **Still push-only, still confirmed.** Every §9.3 rule holds for a data push: the remote destination
+  must pass the path guard, the directory is created only with permission, and **an existing remote file
+  or directory is never silently overwritten** — ask first. Nothing is ever pulled back (§9.4.2).
+- **Say what it will cost before starting.** For a large push, report the local size (`du -sh`) and that
+  the transfer runs on the user's connection until it finishes. Where the data is **public**, mention
+  the cheaper route — download it directly on the cluster with the data-retrieval skills (`ena`, `geo`,
+  `arrayexpress`, `pride`, `sra`, `fastq-download-script`) instead of uploading from a laptop. It is a
+  recommendation, not a refusal: if the user wants to push their local copy, push it.
+- **Print-the-command mode — `--print-only`.** Many users would rather run the upload themselves: from a
+  terminal they control, in a `screen`/`tmux` session, or overnight. `transfer` therefore takes
+  **`--print-only`**, which does everything except transfer — it resolves and guards the remote path
+  (§9.3), then **prints the exact `rsync` command and stops**, mirroring the pull hand-off in §9.4.2:
+
+  ```bash
+  # push a samplesheet + params into the run directory
+  rsync -avh samplesheet.csv params.yml run_nfcore_scrnaseq.sh \
+      <username>@<hostname>:/data/<username>/project_1/nfcore/scrnaseq/
+
+  # push a data directory (resumable — -P adds --partial --progress)
+  rsync -avhP fastq <username>@<hostname>:/data/<username>/project_1/
+  ```
+
+  Trailing-slash convention for a push: **end the remote destination with `/`** (it is the directory the
+  files land in), and give the local source **without** a trailing slash so the directory itself is
+  copied rather than only its contents. In this mode the skill creates nothing remotely and asks for no
+  confirmation — there is nothing to confirm, since the user runs it. Say plainly that the destination
+  directory must already exist, or that `rsync` will need it created first.
+- **Genome references are not per-run inputs.** The `fasta`/`gtf`/`spaceranger_reference` paths in §5
+  point at shared cluster locations (`/nfsdata/genome/…`) — use those rather than uploading a reference,
+  and never write into a shared reference tree (§9.3 rejects it anyway).
+- Push destination is the run directory the job script will use — the `$resdir` / samplesheet paths of
+  §4.3 — and it must pass §9.3. The templates default those to `/data/${USER}/…` and
+  `/nfsdata/${USER}/…`, both of which are user-directory prefixes in §9.3.
+- **Keep the job script and its params file together.** They are pushed to the **same directory**, since
+  the script references `params.yml` / `custom.config` by relative path and `submit` runs `sbatch` from
+  there (§4.5, §9.4). Data files may live anywhere the samplesheet points, as long as it passes §9.3.
+- **Concrete paths only.** §4.3 writes paths as `UPPERCASE` placeholders and `${USER}`, which
+  `build_job.py` fills in (§7). By the time a path reaches this skill it must be **fully resolved** —
+  `/data/<username>/project_1/…`, never `/data/${USER}/RESULTS_DIR` or `PATH_TO_SAMPLE_SHEET`. §9.3
+  rejects an unexpanded `$VAR`; do not expand one on the user's behalf, ask for the real path.
+
+#### 9.4.1 What `cleanup` may remove — the allow-list
+
+`cleanup` is restricted to the intermediate, regenerable, and bulk-input artifacts that follow the
+pipeline skills' output conventions (§4.3, §4.8). The decision is made on the **final component of the
+path** — its directory name, or its file extension:
+
+| Kind | Removable targets | Where these come from |
+|---|---|---|
+| Pipeline directories | `work`, `out`, `outs`, `sra`, `fastq`, `.nextflow` | `work` + `.nextflow` = the Nextflow workdir/cache in the **launch directory** (§4.8); `out` = `$outdir` (`$resdir/out`, §4.3); `outs` = Cell Ranger / Space Ranger per-sample output dirs; `sra`/`fastq` = download areas written by the `sra` and `fastq-download-script` skills |
+| Compressed inputs | `*.zip`, `*.tar.gz`, `*.tgz`, `*.gz` | Downloaded/compressed inputs that can be fetched again |
+| Zarr archives | `*.zarr` | A directory, removed as a whole (spatial data) |
+| Dataset objects | `*.rds`, `*.h5ad`, `*.h5`, `*.pkl`, `*.h5seurat` | Analysis objects a pipeline can regenerate |
+| Proteomics raw inputs | `*.d` directories, `*.raw` files | Bruker `.d/` directories and Thermo `.raw` files |
+
+- **Match on kind, not just on name.** A directory-name entry matches **only a directory**; a file
+  extension matches **only a file**; `*.zarr` and `*.d` are directories. And the name must match
+  **exactly**, not as a substring — `/…/project_1/work` yes, `/…/project_1/workflows` no. This is what
+  keeps the SLURM `slurm-<jobid>.out` logs and the `*.sh` / `*.out` copies §4.8 places in `$resdir`
+  from ever being mistaken for the `out` directory entry.
+- **Anything not on this list is refused** — a `results` folder, `$resdir` **itself** (it holds the
+  `nextflow_report.html` from §4.5's `-with-report $resdir/…` plus the `*.sh`/`*.out` copies from §4.8),
+  a `params.yml`, a job script, a samplesheet, `contrasts.csv`, a `matrix` TSV, an `.sdrf.tsv`, a log, an
+  unrecognised directory. Say which rule the target failed and stop; do not offer to remove a parent
+  instead.
+- **Several allow-listed kinds are also pipeline *inputs*.** "Regenerable" is not "worthless" — name the
+  cost in the confirmation prompt:
+  - `integrated_scvi_finalized.h5ad` is the **required `--base_adata` input** of scdownstream's
+    `downstream` entry (§4.7); regenerating it means re-running the entire `qc_clustering` stage.
+  - an `outs` directory can be the **`spaceranger_dir` input** of a spatialvi processed-data run, and
+    `.h5`/`.h5ad` files are the per-sample inputs listed in a scdownstream samplesheet.
+  - `.raw` / `.d` data referenced by a `*.sdrf.tsv`, and `fastq`/`sra` downloads referenced by a
+    samplesheet, must be re-downloaded before that run can be repeated.
+- The allow-list is a set of **constants in `slurm_ops.py`** — `CLEANUP_DIR_NAMES`,
+  `CLEANUP_DIR_SUFFIXES` (`.zarr`, `.d`), `CLEANUP_FILE_SUFFIXES`, and `CLEANUP_RESULT_DIRS` (the
+  `out`/`outs` warning). Extend those — never bypass the check for a one-off request.
+- `out` / `outs` hold pipeline **results**. They are removable, but say so plainly in the confirmation
+  prompt — echo the full path and state that these are results, not scratch.
+- **No globbing, ever** (§9.3). To clear several files of an allowed kind, list them first with `ls`,
+  show the user the exact list, and then remove them **one explicit full path at a time** — the skill
+  never hands a `*` to the remote shell and never expands one locally into a single blind command.
+
+Typical shape:
+
+```bash
+python3 scripts/slurm_ops.py cleanup --user <username> --host <hostname> \
+    --path /data/<username>/project_1/nfcore/scrnaseq/work
+# → guard: absolute ✓, under a user-directory prefix as /<username>/ ✓,
+#          at least one level below /data/<username> ✓, no glob ✓
+# → allow-list: final component is `work` ✓ (§9.4.1)
+# → shows `ls` + `du -sh` of the target, asks the user
+# → rm -rf /data/<username>/project_1/nfcore/scrnaseq/work   (only after confirmation)
+
+# refused — passes §9.3 but is not a removable kind:
+#   --path /data/<username>/project_1/nfcore/scrnaseq/params.yml
+#   --path /data/<username>/project_1/results
+```
+
+#### 9.4.2 Getting results back — the printed `rsync` hand-off
+
+`transfer` is push-only (§9.4), so the skill never pulls results down. Instead, **once `job_status`
+reports the job `complete`, tell the user the exact `rsync` command to fetch the output directory
+themselves** — the pull counterpart of `transfer --print-only` (§9.4.0):
+
+```bash
+# whole results directory — out/ plus the report and the job's own logs
+rsync -avh <username>@<hostname>:/data/<username>/project_1/nfcore/scrnaseq scrnaseq
+
+# or just the pipeline outputs
+rsync -avh <username>@<hostname>:/data/<username>/project_1/nfcore/scrnaseq/out out
+```
+
+- Flags: **`-a`** (recursive, preserves permissions/times/symlinks), **`-v`** (verbose), **`-h`**
+  (human-readable sizes). For a large or previously interrupted transfer, offer **`-avhP`** — `-P` adds
+  `--partial --progress`, so a resumed run picks up where it stopped.
+- **Default to the run's results directory `$resdir`** (§4.3), not `$outdir` alone: besides `out/`, that
+  directory collects the `nextflow_report.html` (written there by §4.5's `-with-report $resdir/…`) and
+  the job-script and SLURM-log copies (`*.sh`, `*.out`) that §4.8 places there at the end of the run —
+  so syncing `$resdir` retrieves the outputs *and* the provenance. Offer `$resdir/out` as the narrower
+  alternative when the user only wants pipeline results.
+- **A cancelled or failed run has no §4.8 copies**, since the job never reached its finalize block — for
+  those, the SLURM `.out` and `.nextflow.log` are still in the launch directory (`WorkDir`, §9.5), so
+  point the user there instead of at a `$resdir` that may hold only a partial `out/`.
+- Give the full absolute remote path, with **no trailing slash** on it.
+- Destination is the **basename of the directory being fetched**, so the copy lands in a matching local
+  folder. Warn the user that rsync creates it: if a folder of that name already exists in their current
+  directory, the copy nests inside it (`out/out`) — so run the command from a clean location, or give a
+  different local destination name.
+- The remote source is the path `submit` reported (§9.4) — quote it exactly; never guess a results path
+  the skill has not seen.
+- The skill **prints the command; it does not run it.** It is the user's transfer, on their machine, in
+  whatever directory they choose — never execute it for them, and never invent a local destination path
+  on their behalf.
+- Suggest fetching results **before** any `cleanup` of `out`/`outs` (§9.4.1) — once removed, they are
+  gone from the cluster.
+
+#### 9.4.3 Submission limit — a maximum of 100 jobs
+
+A user may have **at most 100 jobs on the cluster at once**. `submit` therefore always runs a
+**pre-flight check before `sbatch`**:
+
+```bash
+squeue -u <username> -h -o "%i" | wc -l      # the user's current job count
+```
+
+- If the count is **already at or above 100**, **refuse the submission.** Do not submit and hope; do not
+  submit "just one more". Report the current count, and tell the user to wait for jobs to finish or to
+  `cancel` (§9.4.4) what they no longer need, then ask again.
+- Count the jobs `squeue -u <username>` reports for that user — both running and pending, since a
+  pending job occupies a slot in the queue just the same.
+- Use `--user` from §9.2 for `-u`; never `squeue` for another user, and never fall back to a bare
+  `squeue` over the whole cluster.
+- This matters more than it looks: a Nextflow driver job **submits many child jobs of its own** as the
+  pipeline progresses (§4.6), so one submission can grow into dozens of queue entries. The check is a
+  **snapshot taken before submission** — it cannot bound what a running pipeline goes on to spawn, so
+  report the count to the user when it is already high rather than only at the cap.
+- The limit is a **constant in `slurm_ops.py`** (`MAX_JOBS = 100`), not a magic number sprinkled through
+  the code.
+
+#### 9.4.4 Cancelling a job — `cancel`
+
+- `scancel <jobid>` — **one explicit job id**, taken from the user (normally the id `submit` reported,
+  §9.4). **Never a mass cancel:** no bare `scancel -u <username>`, no job-id ranges, no wildcards, no
+  "cancel everything that looks stuck".
+- **Confirm before cancelling.** Echo the job id and what the job is (`squeue`/`scontrol` shows its name
+  and work dir) and get an explicit go-ahead — cancelling ends real compute mid-flight.
+- Cancel only the user's **own** job: the job id must belong to `--user` (check with
+  `squeue -u <username>` / `sacct`), and refuse otherwise rather than letting the scheduler decide.
+- After a successful cancel, **suggest cleaning up that run's directory** — a cancelled Nextflow run
+  leaves a large, half-finished `work` tree and a `.nextflow` cache behind. `work` and `.nextflow` sit
+  in the directory the job was **launched from**, which is not necessarily `$resdir`: the job scripts
+  delete `work` by relative path (§4.8), so read the actual location from `scontrol show job <jobid>`
+  (`WorkDir`) rather than assuming. Point the user at `cleanup` (§9.4.1) with that concrete path, e.g.:
+
+  ```
+  Cancelled job 1234567 (nf-core:scrnaseq, /data/<username>/project_1/nfcore/scrnaseq).
+  That run's work directory is still on disk. To remove it:
+    python3 scripts/slurm_ops.py cleanup --user <username> --host <hostname> \
+        --path /data/<username>/project_1/nfcore/scrnaseq/work
+  ```
+
+  It stays a **suggestion**: the removal still goes through `cleanup`'s own allow-list, path guard, and
+  confirmation (§9.3, §9.4.1). Never chain a deletion onto a cancel automatically — and note that
+  keeping `work` is what makes a later `-resume` (§4.5) possible, so a user who intends to resume should
+  *not* clean it up.
+
+#### 9.4.5 Unpacking compressed inputs — `templates/run_uncompress.sh`
+
+Input data often arrives compressed — PRIDE projects ship `.zip`, and other sources ship `.tar.gz` —
+whether it was pushed by `transfer` (§9.4.0) or downloaded straight onto the cluster by a data skill.
+Unpacking a multi-GB archive is real work, so it belongs in **its own SLURM job**, not on a login node.
+
+The `slurm` skill ships `templates/run_uncompress.sh` for exactly this. A data-retrieval skill that
+lands an archive on the cluster uses the same template rather than inventing its own.
+
+- **Follows the §4 job-script conventions** that apply: the §4.1 `#SBATCH` header (`--partition=htc`,
+  `--time`, `set -e`, `set -o pipefail`), §4.3 `UPPERCASE` placeholders for the paths, and the §4.3
+  mkdir-guard idiom for the destination. §4.2 (`exec`/`main`) and §4.5 (`nextflow run`) do **not**
+  apply — there is no Nextflow in this job.
+- **Two archive forms**, chosen by extension, each with an explicit destination:
+
+  ```bash
+  # CHANGE to the archive and the directory to unpack into
+  archive=/data/${USER}/PROJECT/ARCHIVE_NAME
+  destdir=/data/${USER}/PROJECT/DEST_DIR
+
+  unzip -n "$archive" -d "$destdir"           # .zip     — -n: never overwrite an existing file
+  tar -xzkf "$archive" -C "$destdir"          # .tar.gz  — -k: keep existing files, don't overwrite
+  ```
+
+  The `${USER}`/`UPPERCASE` forms are the template's placeholders (§4.3); once filled, the resulting
+  absolute paths must satisfy §9.3 like any other path this skill handles.
+- **List before extracting.** `unzip -l` / `tar -tzf` is read-only — use it to show the user what the
+  archive contains and where it will land, before the extraction job is submitted. An archive with
+  absolute or `../` member paths is refused, not "fixed".
+- **Never overwrite silently** (§9.3): unpack into a **named destination directory**, created with
+  permission, and keep the non-overwriting flags — `unzip -n` and `tar -k`, since a plain `tar -xzf`
+  **replaces existing files without asking**. Use an overwriting form only if the user explicitly asks
+  for it.
+- **Submitted like any other job** — through `submit` (§9.4), so it is subject to the 100-job check
+  (§9.4.3) and reports its HPC folder and job id back; check it with `job_status` (§9.5).
+- **The archive is not deleted afterwards.** Once the user has confirmed the unpacked data looks right,
+  the `.zip`/`.tar.gz` is a normal `cleanup` candidate (§9.4.1) — an explicit, separately confirmed step.
+
+### 9.5 Progress reporting from the logs
+
+`job_status` reports more than the raw SLURM state — it tells the user *where the pipeline is*:
+
+- Read the job's stdout/stderr path from `scontrol show job <jobid>` (`StdOut` / `StdErr`). That file
+  lives in the launch directory (`WorkDir`) — always the authoritative copy. Only a run that **completed
+  its finalize block** also has a `*.out` copy in `$resdir` (§4.8); a cancelled or failed run does not,
+  so read `WorkDir` rather than expecting one.
+- `scontrol` only knows **live and recently-finished** jobs; for an older job id fall back to
+  `sacct -j <jobid>` (which is also where the final state comes from).
+- Also read the Nextflow log in the launch directory (`.nextflow.log` / `nextflow.log`), i.e. beside
+  `work` and `.nextflow` — again `WorkDir`, not necessarily `$resdir`.
+- From those, infer the **step the pipeline is currently at** — the process Nextflow most recently
+  submitted or is running — and report it alongside the state.
+- Always report the job state as one of **pending, running, complete, fail, node_fail** (distinguish
+  `node_fail` from an ordinary `fail`: it means the node died, not the pipeline).
+- **Read-only.** Never truncate, edit, move, or delete a log. Tail the relevant portion rather than
+  dumping a whole large file.
+
+**No active monitoring.** `job_status` is a **single on-demand check**, not a watcher: it does not poll
+in a loop, sleep and re-check, tail a log continuously, schedule a follow-up, or hold the session open
+waiting for a job to finish. The user asks whenever they want to know, passing the **job id that
+`submit` reported** (§9.4) — which is exactly why `submit` must state the job id and the HPC folder
+back to the user. Report the state and the current step once, then stop. When the state is `complete`,
+close the loop by printing the `rsync` retrieval command (§9.4.2).
+
+### 9.6 Python API — deltas from §7
+
+The `slurm` skill keeps most of §7 but necessarily departs on two points:
+
+- **Still applies:** Python **standard library only, plus `pyyaml`**; an `argparse` CLI with one clear
+  entry point; writing nothing outside the paths the user named.
+- **Differs — network calls.** §7's "no network calls at runtime" is a *pipeline*-skill rule. Remote
+  calls over SSH are this skill's entire purpose, so that rule does not apply here.
+- **Differs — determinism.** This skill's output is remote side effects, not byte-identical files, so
+  §7's determinism rule is replaced by: **echo every remote command to the user before it runs**, and
+  **confirm every state-changing command** (create, overwrite, submit, remove) first (§9.3).
+- **How confirmation works — the `--confirm` gate.** Every state-changing subcommand (`transfer`,
+  `submit`, `cancel`, `cleanup`) runs in two steps: **without `--confirm` it does the read-only probes,
+  prints the exact plan — host, target paths, the command it would run, sizes — and exits changing
+  nothing.** The skill shows that plan to the user, and only after they agree does it re-run the same
+  command with `--confirm`. Never pass `--confirm` on the first invocation; the flag *is* the user's
+  permission, so inventing it defeats §9.3. Replacing existing remote files needs a second, separate
+  flag (`--overwrite`), and `job_status` is read-only and needs no gate.
+- Shell out to the system `ssh` / `scp` / `rsync` binaries via `subprocess` with an **argument list,
+  never `shell=True`** — that is what makes the quoting rule in §9.3 enforceable. No third-party SSH
+  library.
+- Fail loudly and stop. On a guard violation, an auth failure, or a non-zero remote exit status,
+  report what happened and halt — never retry with a weaker check, a different auth method, or a
+  broadened path.

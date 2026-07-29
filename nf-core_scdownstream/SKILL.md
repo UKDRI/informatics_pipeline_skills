@@ -14,8 +14,8 @@ description: >-
 
 ## 1. Purpose
 Generate ready-to-submit SLURM job scripts and validated `params_<entry>.yml` files for the
-nf-core:scdownstream pipeline. The repo does not execute the pipeline; the user submits each script
-with `sbatch` on the cluster.
+nf-core:scdownstream pipeline. This skill only produces files. The generated job scripts are what the
+**`slurm` skill** uses to transfer each stage to the HPC and submit it with `sbatch`.
 
 **This is a substantially modified UKDRI fork** (DESIGN.md §8), tracked on the **`dev_ukdri`** branch
 of <https://github.com/UKDRI/scdownstream> (version `0.0.1dev`, pinned commit `3009f37`). Its
@@ -115,9 +115,14 @@ your `--input`/`--resdir`. Both scripts already pin the dev `main.nf`
 
 ## 8. Hand back
 Tell the user the paths of the generated `run_nfcore_scdownstream_<entry>.sh` and
-`params_<entry>.yml`. They submit each stage with `sbatch run_nfcore_scdownstream_qc_clustering.sh`
-first, then — once `integrated_scvi_finalized.h5ad` exists — `sbatch
-run_nfcore_scdownstream_downstream.sh`, run from their respective results directories.
+`params_<entry>.yml`, and that the **`slurm` skill** submits each stage: it transfers a stage's script
+and its `params_<entry>.yml` together (the script references that file by relative path) and runs
+`sbatch` from that directory. The two stages are **sequential** — submit
+`run_nfcore_scdownstream_qc_clustering.sh` first, and only once its
+`integrated_scvi_finalized.h5ad` exists submit `run_nfcore_scdownstream_downstream.sh` with that file
+as `--base_adata`. Use the `slurm` skill's `job_status` on the first job id to know when it has
+completed. Running each `sbatch` by hand is equally fine. Never submit the jobs yourself from this
+skill.
 
 ## Species selection
 Pass `--species mouse|human` to set the `species` field (applies to both entry points). The

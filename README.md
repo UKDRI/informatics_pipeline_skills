@@ -1,10 +1,13 @@
 # informatics_pipeline_skills
 
-A collection of Claude Code **skills**, one per Nextflow nf-core-style pipeline, that help you
-assemble everything needed to run a pipeline job on the UKDRI SLURM cluster. Each skill produces a
-ready-to-submit **SLURM job script** and a validated **`params.yml`** (plus, optionally, a custom
-process-resource config). **The repository never runs a pipeline** — it only generates these
-artifacts, which you submit yourself with `sbatch`.
+A collection of Claude Code **skills** for running Nextflow nf-core-style pipelines on the UKDRI SLURM
+cluster. There are two kinds:
+
+- **Pipeline skills** — one per pipeline. Each produces a ready-to-submit **SLURM job script** and a
+  validated **`params.yml`** (plus, optionally, a custom process-resource config). They generate files
+  and nothing else.
+- **The `slurm` skill** — runs those job scripts on the cluster: transfer, submit, job status, cancel,
+  and cleanup of intermediate files.
 
 ## Pipelines
 
@@ -18,6 +21,24 @@ artifacts, which you submit yourself with `sbatch`.
 | `bigbio_quantmsdiann` | DIA proteomics (DIA-NN) |
 
 Each pipeline folder contains its skill definition, job-script template, and pinned reference files.
+
+## Cluster operations — the `slurm` skill
+
+| Command | Does |
+|---|---|
+| `transfer` | push job scripts, params, samplesheets and input data to the HPC (push only) |
+| `submit` | `sbatch` the job script from its own directory; reports the HPC folder and job id |
+| `job_status` | SLURM state (pending/running/complete/fail/node_fail) plus the current pipeline step |
+| `cancel` | `scancel` one job, then suggest cleaning up its work directory |
+| `cleanup` | remove intermediate data (`work`, `out`, archives, dataset objects, …) |
+
+It also ships a job template for unpacking `.zip`/`.tar.gz` input archives on the cluster.
+
+**Safety, by design:** it always asks for your username and hostname and never guesses them; it never
+uses passwords (passwordless SSH is yours to configure); it refuses to touch anything outside your own
+directories or at the top of a hierarchy; it never uses wildcards in a path; and it changes nothing
+until it has shown you the exact command and you have confirmed it. Submissions are also capped at 100
+jobs. Results are never pulled down for you — you get an `rsync` command to run yourself.
 
 ## Key features
 
@@ -38,10 +59,13 @@ Each pipeline folder contains its skill definition, job-script template, and pin
 
 ## Usage
 
-Invoke the relevant skill in Claude Code and provide your inputs (typically a `samplesheet.csv`
-prepared beforehand, e.g. via the `ena`, `geo`, `arrayexpress`, or `pride` data-retrieval skills).
-The skill gathers your choices, generates the job script and `params.yml`, and hands back the file
-paths to submit with `sbatch`.
+Invoke the relevant pipeline skill in Claude Code and provide your inputs (typically a
+`samplesheet.csv` prepared beforehand, e.g. via the `ena`, `geo`, `arrayexpress`, or `pride`
+data-retrieval skills). It gathers your choices and generates the job script and `params.yml`.
+
+Then use the `slurm` skill to transfer those files to the cluster and submit the job — it reports the
+HPC folder and job id, and you check progress with `job_status` whenever you like. Submitting with
+`sbatch` yourself works just as well.
 
 ## For contributors
 
