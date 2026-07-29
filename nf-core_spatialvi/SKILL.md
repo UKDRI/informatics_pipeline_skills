@@ -14,8 +14,8 @@ description: >-
 Generate a ready-to-submit SLURM job script (`run_nfcore_spatialvi.sh`) and a validated
 `params.yml` for one nf-core/spatialvi run (10x Visium / Visium HD spatial transcriptomics:
 optional Space Ranger processing followed by QC, normalization, clustering, spatially variable
-genes and multi-sample integration). The repo does not execute the pipeline; the user submits the
-script with `sbatch` on the cluster.
+genes and multi-sample integration). This skill only produces files. The generated job script is what
+the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sbatch`.
 
 **Dev pipeline.** spatialvi is tracked on the `dev` branch (version `1.0dev`, commit `d0fd35d`).
 The template pins `main=/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a dev build, not a
@@ -86,8 +86,11 @@ into `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run and t
 cluster — this is a dev build, not a tagged release.
 
 ## 6. Hand back
-Tell the user the paths of the generated `run_nfcore_spatialvi.sh` and `params.yml`, and that they
-submit with `sbatch run_nfcore_spatialvi.sh` from the results directory.
+Tell the user the paths of the generated `run_nfcore_spatialvi.sh` and `params.yml`, and that the
+**`slurm` skill** takes it from here: it transfers both files to the HPC, submits
+`run_nfcore_spatialvi.sh` with `sbatch` (from the directory holding `params.yml`, which the script
+references by relative path), and reports the job id. Running `sbatch run_nfcore_spatialvi.sh` on the
+cluster by hand is equally fine. Never submit the job yourself from this skill.
 
 ## Custom-config recommendations
 (None specific to spatialvi yet. Space Ranger and integration are the heaviest steps — scale the

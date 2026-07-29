@@ -12,8 +12,9 @@ description: >-
 
 ## 1. Purpose
 Generate a ready-to-submit SLURM job script (`run_nfcore_differentialabundance.sh`) and a validated
-`params.yml` for one nf-core/differentialabundance run. The repo does not execute the pipeline; the
-user submits the script with `sbatch` on the cluster.
+`params.yml` for one nf-core/differentialabundance run. This skill only produces files. The generated
+job script is what the **`slurm` skill** uses to transfer the run to the HPC and submit it with
+`sbatch`.
 
 ## Modified from upstream
 This is a **substantially modified UKDRI fork** of nf-core/differentialabundance, tracked on the
@@ -75,7 +76,11 @@ run.
 
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_differentialabundance.sh` and `params.yml`, and
-that they submit with `sbatch run_nfcore_differentialabundance.sh` from the results directory.
+that the **`slurm` skill** takes it from here: it transfers the job script, `params.yml`, the
+samplesheet, `contrasts.csv` and the `matrix` TSV to the HPC, submits
+`run_nfcore_differentialabundance.sh` with `sbatch` (from the directory holding `params.yml`, which the
+script references by relative path), and reports the job id. Running `sbatch` on the cluster by hand is
+equally fine. Never submit the job yourself from this skill.
 
 ## Custom-config recommendations
 (None specific to differentialabundance yet. Scale process memory/cpus via `-c custom.config` for

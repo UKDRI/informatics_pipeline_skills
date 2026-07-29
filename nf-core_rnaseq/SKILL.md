@@ -12,8 +12,8 @@ description: >-
 
 ## 1. Purpose
 Generate a ready-to-submit SLURM job script (`run_nfcore_rnaseq.sh`) and a validated
-`params.yml` for one nf-core/rnaseq run. The repo does not execute the pipeline; the user submits
-the script with `sbatch` on the cluster.
+`params.yml` for one nf-core/rnaseq run. This skill only produces files. The generated job script is
+what the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sbatch`.
 
 ## 2. Required inputs
 - **`samplesheet.csv`** — prepared beforehand (see the `ena`/`geo`/`arrayexpress` skills). Columns:
@@ -52,8 +52,11 @@ python3 scripts/build_job.py \
 `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` and the pinned `main.nf` version suit the run.
 
 ## 6. Hand back
-Tell the user the paths of the generated `run_nfcore_rnaseq.sh` and `params.yml`, and that they
-submit with `sbatch run_nfcore_rnaseq.sh` from the results directory.
+Tell the user the paths of the generated `run_nfcore_rnaseq.sh` and `params.yml`, and that the
+**`slurm` skill** takes it from here: it transfers both files to the HPC, submits
+`run_nfcore_rnaseq.sh` with `sbatch` (from the directory holding `params.yml`, which the script
+references by relative path), and reports the job id. Running `sbatch run_nfcore_rnaseq.sh` on the
+cluster by hand is equally fine. Never submit the job yourself from this skill.
 
 ## Custom-config recommendations
 (None specific to rnaseq yet. Scale `withLabel: 'process_high'` memory/cpus for very large genomes
