@@ -91,7 +91,7 @@ python3 scripts/slurm_ops.py transfer --user <username> --host <hostname> \
 - **What to push:** `run_*.sh`, `params.yml` / `params_<entry>.yml`, `custom.config`,
   `samplesheet.csv`, `contrasts.csv` (plural — the differentialabundance parameter is `contrasts`),
   the abundance `matrix` TSV, `*.sdrf.tsv` (quantmsdiann), optionally `metadata.tsv`; **and input
-  data**: `fastq`/`sra` directories, Cell Ranger / Space Ranger `outs` directories, `*.raw` files and
+  data**: `fastq`/`fastqs`/`sra` directories, Cell Ranger / Space Ranger `outs` directories, `*.raw` files and
   `*.d/` directories, `*.tar.gz`/`*.zip` archives, `*.rds`/`*.pkl`/`*.h5ad` objects, any `*.csv`/`*.tsv`.
 - **Keep the job script and its params file in the same directory** — the script references
   `params.yml` and `custom.config` by *relative* path, and `submit` runs `sbatch` from there.

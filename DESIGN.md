@@ -788,7 +788,7 @@ in the §6 input chain that the user already holds locally:
 
 | Kind | Examples / consumed by |
 |---|---|
-| Sequencing reads | `fastq` directories and FASTQ files; `sra` download directories |
+| Sequencing reads | `fastq` / `fastqs` directories and FASTQ files; `sra` download directories |
 | Aligner/counter outputs | Cell Ranger and Space Ranger **`outs` directories** (scrnaseq output, spatialvi `spaceranger_dir` input) |
 | Proteomics raw data | `*.raw` files, `*.d/` directories (quantmsdiann, referenced from its `*.sdrf.tsv`) |
 | Archives | `*.tar.gz`, `*.zip` — unpack them on the cluster with the job in §9.4.5 |
