@@ -519,7 +519,12 @@ def cmd_download(args: argparse.Namespace) -> None:
         else DEFAULT_MAX_FILE_SIZE_BYTES
     skip_dirs = () if args.include_work else DOWNLOAD_SKIP_DIRS
 
-    dest = args.dest or posixpath.basename(remote)
+    # --dest is the directory to download INTO; rsync copies the remote directory as a
+    # child of it, so the data always lands in <dest>/<name of the remote dir>. The
+    # destination is created before rsync runs, which makes that landing spot the same
+    # whether or not --dest already existed.
+    dest = args.dest or "."
+    landing = os.path.join(dest, posixpath.basename(remote))
     local_hint = full_rsync_hint(args.user, args.host, remote, dest)
 
     # 1. scan
@@ -611,25 +616,34 @@ def cmd_download(args: argparse.Namespace) -> None:
         info("")
         info("Or the complete tree, large files included:")
         info("  " + " ".join(shlex.quote(a) for a in local_hint))
+        info("")
+        info(f"Either way the data lands in {landing}.")
         return
 
     # 4. plan + local destination checks (a download writes to the user's disk)
     info("")
     info("Download plan:")
     info(f"  from    : {target(args.user, args.host)}:{remote}")
-    info(f"  into    : {dest}")
+    info(f"  into    : {landing}")
     info(f"  size    : {human_size(total)} in {len(selected)} files")
     info("  command : " + " ".join(shlex.quote(a) for a in argv))
 
-    if os.path.exists(dest):
-        if not os.path.isdir(dest):
-            die(f"local destination exists but is not a directory: {dest}")
-        existing = os.listdir(dest)
-        if existing and not args.overwrite:
-            info(f"  NOTE: {dest} already exists and holds {len(existing)} entries.")
+    if os.path.exists(dest) and not os.path.isdir(dest):
+        die(f"local destination exists but is not a directory: {dest}")
+
+    # Compare against what the download actually writes — the incoming directory —
+    # not against whatever else --dest happens to hold. Unrelated neighbours are none
+    # of this check's business; only a previous copy of THIS directory is.
+    if os.path.exists(landing):
+        if not os.path.isdir(landing):
+            die(f"a file already exists where the download would land: {landing}")
+        clashing = os.listdir(landing)
+        if clashing and not args.overwrite:
+            info(f"  NOTE: {landing} already exists and holds {len(clashing)} entries.")
             die(
-                f"refusing to write into the non-empty directory {dest}. Choose another "
-                "--dest, or re-run with --overwrite if replacing its contents is intended."
+                f"refusing to write into the existing directory {landing} — a previous copy of "
+                "this results directory is already there. Choose another --dest, or re-run with "
+                "--overwrite to update it in place."
             )
 
     if not args.confirm:
@@ -640,7 +654,7 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     # 5. hand back: the full-tree command, then the cleanup suggestion (never run here)
     info("")
-    info(f"Downloaded {human_size(total)} into {dest}")
+    info(f"Downloaded {human_size(total)} into {landing}")
     if excluded:
         info("")
         info(f"{len(excluded)} large files ({human_size(excluded_total)}) were NOT downloaded. "
@@ -1016,7 +1030,9 @@ def main() -> None:
     p.add_argument("--remote", required=True,
                    help="remote results directory to download (must be under the user's own "
                         "directory; another user's path is refused)")
-    p.add_argument("--dest", help="local destination directory (default: basename of --remote)")
+    p.add_argument("--dest", help="local directory to download INTO; the remote directory is "
+                                  "copied inside it, so the data lands in "
+                                  "<dest>/<name of the remote dir> (default: current directory)")
     p.add_argument("--max-file-size", default=None,
                    help=f"exclude files larger than this (default "
                         f"{human_size(DEFAULT_MAX_FILE_SIZE_BYTES)}; e.g. 100M)")

@@ -1098,10 +1098,19 @@ running an empty transfer.
 throughout, matching rsync's `K`/`M`/`G` suffixes: "2 GB" here means 2 GiB (`2 * 1024**3`) and "500 MB"
 means 500 MiB, so the scan's arithmetic and `--max-size` cannot disagree.
 
-**Local destination.** `--dest` defaults to the basename of `--remote`. It is created only as part of a
-confirmed download, and a **non-empty existing directory is refused** unless `--overwrite` is given —
-the same no-silent-overwrite rule `transfer` applies remotely (§9.3), because this direction writes to
-the user's own disk.
+**Local destination.** `--dest` is the directory to download **into** (default: the current directory).
+`rsync` copies the remote directory as a child of it, so the data always lands in
+**`<dest>/<name of the remote directory>`** — the *landing directory*. Creating `--dest` before `rsync`
+runs is what makes that spot the same whether or not it already existed; report the landing directory in
+the plan, never just `--dest`.
+
+The no-silent-overwrite rule (§9.3) applies here too, because this direction writes to the user's own
+disk — but it must compare against **the landing directory, not `--dest`'s emptiness**. Unrelated files
+already sitting in `--dest` are none of the check's business; only a previous copy of *this* results
+directory is. So: refuse when the landing directory exists and is non-empty (unless `--overwrite`, which
+updates it in place), and refuse outright when a *file* occupies that name. Checking `--dest` for any
+content instead demands `--overwrite` when nothing whatsoever would be replaced, which trains the user
+to pass the flag by reflex — the opposite of what a confirmation is for.
 
 **The flags**, all of which may tighten the limits and none of which loosen the 2 GB cap or Rule 0:
 `--remote` (source, guarded), `--dest`, `--max-file-size`, `--include-work`, `--progress` (adds `-P`
