@@ -26,7 +26,8 @@ Each pipeline folder contains its skill definition, job-script template, and pin
 
 | Command | Does |
 |---|---|
-| `transfer` | push job scripts, params, samplesheets and input data to the HPC (push only) |
+| `transfer` | upload job scripts, params, samplesheets and input data to the HPC |
+| `download` | pull a results directory back — scanned first, big files excluded, max 2 GB |
 | `submit` | `sbatch` the job script from its own directory; reports the HPC folder and job id |
 | `job_status` | SLURM state (pending/running/complete/fail/node_fail) plus the current pipeline step |
 | `cancel` | `scancel` one job, then suggest cleaning up its work directory |
@@ -35,10 +36,15 @@ Each pipeline folder contains its skill definition, job-script template, and pin
 It also ships a job template for unpacking `.zip`/`.tar.gz` input archives on the cluster.
 
 **Safety, by design:** it always asks for your username and hostname and never guesses them; it never
-uses passwords (passwordless SSH is yours to configure); it refuses to touch anything outside your own
-directories or at the top of a hierarchy; it never uses wildcards in a path; and it changes nothing
-until it has shown you the exact command and you have confirmed it. Submissions are also capped at 100
-jobs. Results are never pulled down for you — you get an `rsync` command to run yourself.
+uses passwords (passwordless SSH is yours to configure); it refuses to read from or write to anything
+outside your own directories or at the top of a hierarchy; it never uses wildcards in a path; and it
+changes nothing until it has shown you the exact command and you have confirmed it. Submissions are
+capped at 100 jobs.
+
+Downloads are deliberately narrow: only from your own directories **and only files you own** (both the
+path and the file ownership are checked), scanned before anything moves, files over 500 MB excluded,
+**2 GB total maximum**, and never started without your go-ahead. For the complete results tree — large
+files included — you get an `rsync` command to run yourself.
 
 ## Key features
 
