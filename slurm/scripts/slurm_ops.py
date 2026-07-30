@@ -325,9 +325,32 @@ def remote_kind(user: str, host: str, path: str) -> str:
 
 
 def remote_text(user: str, host: str, argv: list) -> str:
-    """Read-only remote command whose stdout we want; empty string on failure."""
+    """Read-only remote command whose stdout is OPTIONAL; empty string on failure.
+
+    Only for output we can do without — a log tail, a `du`, a listing. Never for a
+    probe whose result gates a decision: an empty string is indistinguishable from a
+    failed command, so a check built on this would silently pass. Use remote_probe().
+    """
     res = run_remote(user, host, argv, echo=False, check=False)
     return res.stdout if res.returncode == 0 else ""
+
+
+def remote_probe(user: str, host: str, argv: list, what: str) -> str:
+    """Read-only remote command whose stdout is REQUIRED — halts if it fails.
+
+    Fail closed (DESIGN.md §9.6): a check that cannot be carried out is not a check
+    that passed. Every safety- or limit-gating probe goes through here so a broken or
+    unsupported remote command can never be read as a negative answer.
+    """
+    res = run_remote(user, host, argv, echo=False, check=False)
+    if res.returncode != 0:
+        if res.stderr:
+            sys.stderr.write(res.stderr if res.stderr.endswith("\n") else res.stderr + "\n")
+        die(
+            f"could not {what}: `{argv[0]}` exited {res.returncode} on the cluster. This check "
+            "cannot be skipped, so nothing was changed — resolve the error above and try again."
+        )
+    return res.stdout
 
 
 # --------------------------------------------------------------------------- #
@@ -450,8 +473,14 @@ def foreign_owned(user: str, host: str, path: str) -> bool:
     """True if `path` itself belongs to someone other than `user`.
 
     Same `-user` predicate as the scan above — the cluster resolves the identity.
+    Uses remote_probe, so a failed check halts instead of reporting "not foreign":
+    an ownership test that could not run must never read as one that passed.
     """
-    out = remote_text(user, host, ["find", path, "-maxdepth", "0", "!", "-user", user, "-print"])
+    out = remote_probe(
+        user, host,
+        ["find", path, "-maxdepth", "0", "!", "-user", user, "-print"],
+        f"determine who owns {path}",
+    )
     return bool(out.strip())
 
 
@@ -631,7 +660,16 @@ def cmd_download(args: argparse.Namespace) -> None:
 # submit (DESIGN.md §9.4, §9.4.3)
 # --------------------------------------------------------------------------- #
 def queued_job_count(user: str, host: str) -> int:
-    out = remote_text(user, host, ["squeue", "-u", user, "-h", "-o", "%i"])
+    """The user's current queue length. Halts if squeue cannot be read.
+
+    A failed `squeue` used to come back as zero, which read as "the queue is empty"
+    and let a submission through regardless of the real count (§9.4.3).
+    """
+    out = remote_probe(
+        user, host,
+        ["squeue", "-u", user, "-h", "-o", "%i"],
+        f"count the jobs already queued for {user}",
+    )
     return len([line for line in out.splitlines() if line.strip()])
 
 
@@ -671,7 +709,9 @@ def cmd_submit(args: argparse.Namespace) -> None:
         )
 
     # The script's -params-file / -c are relative paths, so they must sit beside it (§4.5).
-    text = remote_text(args.user, args.host, ["cat", script])
+    # remote_probe, not remote_text: an unreadable script used to yield "" here, which
+    # parsed to "no relative inputs" and skipped the check entirely.
+    text = remote_probe(args.user, args.host, ["cat", script], f"read the job script {script}")
     missing = [
         n for n in script_relative_inputs(text)
         if remote_kind(args.user, args.host, posixpath.join(rundir, n)) == "missing"

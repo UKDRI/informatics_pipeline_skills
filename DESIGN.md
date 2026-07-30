@@ -965,6 +965,8 @@ squeue -u <username> -h -o "%i" | wc -l      # the user's current job count
   pending job occupies a slot in the queue just the same.
 - Use `--user` from §9.2 for `-u`; never `squeue` for another user, and never fall back to a bare
   `squeue` over the whole cluster.
+- **If `squeue` fails, refuse to submit.** An unreadable queue is not an empty queue: treating a failed
+  command as "0 jobs" waves the cap through precisely when the cluster is unhealthy (§9.6, fail closed).
 - This matters more than it looks: a Nextflow driver job **submits many child jobs of its own** as the
   pipeline progresses (§4.6), so one submission can grow into dozens of queue entries. The check is a
   **snapshot taken before submission** — it cannot bound what a running pipeline goes on to spawn, so
@@ -1062,6 +1064,8 @@ and no flag overrides this.**
      file tagged `F` is a hard stop**: report the offenders and refuse the whole download. Do not filter
      them out and continue — an `--exclude` that silently drops files is how the wrong data gets copied.
      Tell the user to narrow the source to a directory holding only their own results.
+   - **if either check cannot run, refuse** (§9.6): a `find` that exits non-zero says nothing about
+     ownership, so its empty output must never be read as "owned by the user".
 
 Two further points the implementation honours:
 
@@ -1183,3 +1187,11 @@ The `slurm` skill keeps most of §7 but necessarily departs on two points:
 - Fail loudly and stop. On a guard violation, an auth failure, or a non-zero remote exit status,
   report what happened and halt — never retry with a weaker check, a different auth method, or a
   broadened path.
+- **A check that could not run is not a check that passed.** Any probe whose result gates a decision —
+  ownership (§9.4.6), the job count (§9.4.3), reading the job script to verify its relative inputs
+  (§4.5) — must **fail closed**: if the remote command exits non-zero, report its stderr and halt,
+  rather than treating empty output as a negative answer. In code that is the split between
+  `remote_probe()` (required, halts) and `remote_text()` (optional output such as a log tail, a `du`,
+  or a listing, where an empty result is harmless). Getting this wrong is silent: a failed `squeue`
+  reads as "0 jobs queued" and waves the cap through, and a failed ownership `find` reads as
+  "owned by the user".
