@@ -406,35 +406,53 @@ def cmd_transfer(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------- #
 # download (DESIGN.md §9.4.6)
 # --------------------------------------------------------------------------- #
-def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list:
-    """[(size, owner, path), ...] for every regular file under `path`.
+def remote_uid(user: str, host: str) -> str:
+    """Numeric uid of `user` on the cluster; '' if the account is unknown there."""
+    return remote_text(user, host, ["id", "-u", user]).strip()
 
-    Read-only. `find` is used WITHOUT -L, so a symlink pointing at another user's
-    data is never followed — matching `rsync -a`, which copies it as a symlink.
-    The owner comes back with each file so the caller can verify the results really
-    belong to the user (§9.4.6 rule 0), not merely sit under their path.
+
+def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list:
+    """[(is_foreign, size, path), ...] for every regular file under `path`.
+
+    Ownership is decided by `find -user` ON THE CLUSTER, never by comparing owner
+    strings here: `find`'s `%U` is a numeric uid while `%u` is a name — and GNU
+    `stat` uses those two letters the other way round. Comparing either against
+    --user is how every file in the user's own tree once got flagged as foreign.
+    So the remote system resolves the identity and just tags each file:
+    'F' = owned by someone else, 'O' = owned by --user.
+
+    Read-only, and WITHOUT -L, so a symlink pointing at another user's data is never
+    followed — matching `rsync -a`, which copies it as a symlink.
     """
     argv = ["find", path]
     for name in skip_dirs:
         argv += ["-name", name, "-prune", "-o"]
-    argv += ["-type", "f", "-printf", "%s\\t%U\\t%p\\n"]
+    argv += [
+        "-type", "f", "(",
+        "!", "-user", user, "-printf", "F\\t%s\\t%p\\n",
+        "-o", "-printf", "O\\t%s\\t%p\\n", ")",
+    ]
 
     out = remote_text(user, host, argv)
     entries = []
     for line in out.splitlines():
         parts = line.split("\t", 2)
-        if len(parts) != 3:
-            continue                      # ignore anything not size<TAB>owner<TAB>path
+        if len(parts) != 3 or parts[0] not in ("F", "O"):
+            continue                      # ignore anything not tag<TAB>size<TAB>path
         try:
-            entries.append((int(parts[0]), parts[1], parts[2]))
+            entries.append((parts[0] == "F", int(parts[1]), parts[2]))
         except ValueError:
             continue
     return entries
 
 
-def remote_owner(user: str, host: str, path: str) -> str:
-    """Owner of one remote path, or '' if it could not be read."""
-    return remote_text(user, host, ["stat", "-c", "%U", path]).strip()
+def foreign_owned(user: str, host: str, path: str) -> bool:
+    """True if `path` itself belongs to someone other than `user`.
+
+    Same `-user` predicate as the scan above — the cluster resolves the identity.
+    """
+    out = remote_text(user, host, ["find", path, "-maxdepth", "0", "!", "-user", user, "-print"])
+    return bool(out.strip())
 
 
 def full_rsync_hint(user: str, host: str, remote: str, dest: str) -> list:
@@ -450,14 +468,22 @@ def cmd_download(args: argparse.Namespace) -> None:
     if remote_kind(args.user, args.host, remote) != "dir":
         die(f"remote path is not a directory on the cluster: {remote}")
 
+    # Pre-flight the account: this both validates --user against the cluster and
+    # guarantees the `-user` predicate below cannot fail on an unknown name.
+    uid = remote_uid(args.user, args.host)
+    if not uid:
+        die(
+            f"the HPC does not recognise the account {args.user!r} (`id -u` returned nothing). "
+            "Check the username with the user — nothing was read or transferred."
+        )
+
     # Rule 0, second half: the results must BELONG to the user, not merely sit under a
     # path containing their name. A directory owned by someone else is refused here.
-    owner = remote_owner(args.user, args.host, remote)
-    if owner and owner != args.user:
+    if foreign_owned(args.user, args.host, remote):
         die(
-            f"refusing to download {remote}: it is owned by {owner!r}, not {args.user!r}. "
-            "This skill only downloads the user's own results. Ask the owner for the data, or "
-            "give a path under your own directory."
+            f"refusing to download {remote}: it is owned by another user, not {args.user!r} "
+            f"(uid {uid}). This skill only downloads the user's own results. Ask the owner for "
+            "the data, or give a path under your own directory."
         )
 
     max_file = parse_size(args.max_file_size) if args.max_file_size \
@@ -473,14 +499,15 @@ def cmd_download(args: argparse.Namespace) -> None:
     if not entries:
         die(f"no files found under {remote} (nothing to download).")
 
-    # 2a. any file owned by someone else is a hard stop, not something to filter around:
-    #     rsync would copy it, and this skill never pulls another user's data.
-    foreign = sorted(((s, o, p) for s, o, p in entries if o != args.user), reverse=True)
+    # 2a. any file the cluster tagged as owned by someone else is a hard stop, not
+    #     something to filter around: rsync would copy it, and this skill never pulls
+    #     another user's data.
+    foreign = sorted(((s, p) for is_foreign, s, p in entries if is_foreign), reverse=True)
     if foreign:
         info("")
         info(f"  files owned by another user : {len(foreign)}")
-        for size, own, path in foreign[:10]:
-            info(f"      {human_size(size):>8}  [{own}]  {path}")
+        for size, path in foreign[:10]:
+            info(f"      {human_size(size):>8}  {path}")
         if len(foreign) > 10:
             info(f"      ... and {len(foreign) - 10} more")
         die(
@@ -490,8 +517,8 @@ def cmd_download(args: argparse.Namespace) -> None:
         )
 
     # 2b. exclude the big ones
-    selected = [(s, p) for s, _, p in entries if s <= max_file]
-    excluded = sorted(((s, p) for s, _, p in entries if s > max_file), reverse=True)
+    selected = [(s, p) for _, s, p in entries if s <= max_file]
+    excluded = sorted(((s, p) for _, s, p in entries if s > max_file), reverse=True)
     total = sum(s for s, _ in selected)
     excluded_total = sum(s for s, _ in excluded)
 
@@ -512,9 +539,10 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     # 3a. nothing left after exclusion: say so instead of running an empty rsync
     if not selected:
+        smallest = min(s for _, s, _ in entries)
         info("")
         info("To get this data, either:")
-        info(f"  * raise the per-file limit : --max-file-size {human_size(entries[0][0])}"
+        info(f"  * raise the per-file limit : --max-file-size {human_size(smallest)}"
              " (the total cap still applies)")
         info("  * fetch it yourself        : " + " ".join(shlex.quote(a) for a in local_hint))
         die(
@@ -816,7 +844,9 @@ def cmd_cancel(args: argparse.Namespace) -> None:
     )
     if not owner:
         die(f"no job {jobid} found on the cluster — nothing to cancel.")
-    if owner != args.user:
+    # scontrol prints UserId=<name>(<uid>), but falls back to the bare uid when the name
+    # cannot be resolved — so accept either form rather than comparing only names.
+    if owner != args.user and owner != remote_uid(args.user, args.host):
         die(f"job {jobid} belongs to {owner!r}, not {args.user!r}. Refusing to cancel it.")
 
     jobname = fields.get("JobName", "") or sacct_field(args.user, args.host, jobid, "JobName")
