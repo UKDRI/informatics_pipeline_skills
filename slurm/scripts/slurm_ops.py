@@ -61,7 +61,7 @@ DEFAULT_MAX_FILE_SIZE_BYTES = 500 * 1024 ** 2   # "big file" = larger than 500 M
 DOWNLOAD_SKIP_DIRS = ("work", ".nextflow")
 
 # What `cleanup` may remove — matched on the final path component.
-CLEANUP_DIR_NAMES = {"work", "out", "outs", "sra", "fastq", ".nextflow"}
+CLEANUP_DIR_NAMES = {"work", "out", "outs", "sra", "fastq", "fastqs", ".nextflow"}
 CLEANUP_DIR_SUFFIXES = (".zarr", ".d")
 CLEANUP_FILE_SUFFIXES = (
     ".zip", ".tar.gz", ".tgz", ".gz",          # compressed inputs

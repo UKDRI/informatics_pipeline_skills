@@ -852,7 +852,7 @@ path** — its directory name, or its file extension:
 
 | Kind | Removable targets | Where these come from |
 |---|---|---|
-| Pipeline directories | `work`, `out`, `outs`, `sra`, `fastq`, `.nextflow` | `work` + `.nextflow` = the Nextflow workdir/cache in the **launch directory** (§4.8); `out` = `$outdir` (`$resdir/out`, §4.3); `outs` = Cell Ranger / Space Ranger per-sample output dirs; `sra`/`fastq` = download areas written by the `sra` and `fastq-download-script` skills |
+| Pipeline directories | `work`, `out`, `outs`, `sra`, `fastq`, `fastqs`, `.nextflow` | `work` + `.nextflow` = the Nextflow workdir/cache in the **launch directory** (§4.8); `out` = `$outdir` (`$resdir/out`, §4.3); `outs` = Cell Ranger / Space Ranger per-sample output dirs; `sra`/`fastq`/`fastqs` = download areas written by the `sra` and `fastq-download-script` skills |
 | Compressed inputs | `*.zip`, `*.tar.gz`, `*.tgz`, `*.gz` | Downloaded/compressed inputs that can be fetched again |
 | Zarr archives | `*.zarr` | A directory, removed as a whole (spatial data) |
 | Dataset objects | `*.rds`, `*.h5ad`, `*.h5`, `*.pkl`, `*.h5seurat` | Analysis objects a pipeline can regenerate |

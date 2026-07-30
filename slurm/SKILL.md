@@ -217,7 +217,7 @@ Only these are removable, matched on the final path component:
 
 | Kind | Removable |
 |---|---|
-| Directories | `work`, `out`, `outs`, `sra`, `fastq`, `.nextflow`, `*.zarr`, `*.d` |
+| Directories | `work`, `out`, `outs`, `sra`, `fastq`, `fastqs`, `.nextflow`, `*.zarr`, `*.d` |
 | Files | `*.zip`, `*.tar.gz`, `*.gz`, `*.rds`, `*.h5ad`, `*.h5`, `*.pkl`, `*.h5seurat`, `*.raw` |
 
 - Everything else is refused — a results directory other than `out`/`outs`, the run directory itself,
