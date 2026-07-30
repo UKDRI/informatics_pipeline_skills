@@ -126,7 +126,8 @@ Do not look for a way around either check.
 
 ```bash
 python3 scripts/slurm_ops.py download --user <username> --host <hostname> \
-    --remote /data/<username>/project_1/nfcore/scrnaseq --dest scrnaseq
+    --remote /data/<username>/project_1/nfcore/scrnaseq --dest ~/downloads
+# → data lands in ~/downloads/scrnaseq (omit --dest to use the current directory).
 # → scans, reports what it would fetch, and stops. Show that to the user;
 #   only after they agree, re-run with --confirm.
 ```
@@ -144,8 +145,10 @@ How it behaves:
 - **Hard 2 GB cap.** If what remains is still over, it **refuses and transfers nothing**, and shows the
   three ways forward: narrow `--remote` to a subdirectory, lower `--max-file-size`, or run the full
   `rsync` themselves. Do not try to defeat the cap by looping over subdirectories.
-- **Local destination** defaults to the basename of `--remote`; a non-empty existing directory is
-  refused unless the user asks for `--overwrite`.
+- **Local destination**: `--dest` is the directory to download *into* (default: the current directory),
+  and the data lands in `<dest>/<name of the remote dir>` — the plan prints that landing path. Other
+  files already in `--dest` are fine and are left alone; only an existing copy of the *same* results
+  directory is refused, and then `--overwrite` updates it in place.
 - `--print-only` prints the pull command instead of running it; `--progress` adds `-P` for resumability.
 
 **After a download, always hand back two things** (the script prints both — pass them on):
