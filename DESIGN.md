@@ -1049,12 +1049,19 @@ and no flag overrides this.**
    on the source **before the scan**, so a foreign path is never even listed. It governs a *read* source
    exactly as it governs a write target — "it's only reading" is never a reason to relax it.
 2. **The ownership** must match, because a path under `/data/<username>/…` can still hold files that
-   belong to someone else (a group-writable directory, a copy from a colleague). So:
-   - `stat -c %U` on the source directory — **refuse** if it is not owned by `--user`;
-   - the scan returns each file's owner (`find -printf '%s\t%U\t%p\n'`), and **any file owned by another
-     user is a hard stop**: report the offenders with their owners and refuse the whole download. Do not
-     filter them out and continue — an `--exclude` that silently drops files is how the wrong data gets
-     copied. Tell the user to narrow the source to a directory holding only their own results.
+   belong to someone else (a group-writable directory, a copy from a colleague). **Let the cluster
+   decide the identity — never compare owner strings.** `find`'s `%U` is a *numeric uid* while `%u` is a
+   *name*, and GNU `stat` uses those two letters the other way round; comparing either against `--user`
+   is how every file in a user's own tree once came back flagged as foreign. So:
+   - **pre-flight the account** with `id -u <username>` — if the HPC does not recognise it, stop and say
+     so, rather than running checks against a name the system cannot resolve;
+   - **the source directory**: `find <dir> -maxdepth 0 ! -user <username> -print` — any output means it
+     belongs to someone else, and the download is refused;
+   - **each file**: one traversal tags them with `find … \( ! -user <username> -printf 'F\t%s\t%p\n'
+     -o -printf 'O\t%s\t%p\n' \)`, so `find` resolves ownership and the script only reads a tag. **Any
+     file tagged `F` is a hard stop**: report the offenders and refuse the whole download. Do not filter
+     them out and continue — an `--exclude` that silently drops files is how the wrong data gets copied.
+     Tell the user to narrow the source to a directory holding only their own results.
 
 Two further points the implementation honours:
 
@@ -1066,8 +1073,8 @@ Two further points the implementation honours:
 
 **The flow — scan, exclude, check, confirm, pull:**
 
-1. **Scan** the source read-only: `find <dir> -type f -printf '%s\t%p\n'`, pruning the Nextflow scratch
-   dirs `work` and `.nextflow` unless `--include-work` is given.
+1. **Scan** the source read-only with the ownership-tagging `find` from rule 0, pruning the Nextflow
+   scratch dirs `work` and `.nextflow` unless `--include-work` is given.
 2. **Exclude big files** — anything larger than the per-file threshold (`--max-file-size`, default
    **500 MB**). Report how many were excluded and their total size, listing the largest.
 3. **Check the total** of what remains against the **2 GB ceiling**.

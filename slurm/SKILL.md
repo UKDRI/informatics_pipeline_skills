@@ -116,9 +116,11 @@ downloaded, and there is no override:
    `/scratch`. Another user's directory (`/data/<someone-else>/…`), a shared project area, or any other
    root is refused before a single file is listed.
 2. **The ownership** must match — a directory under your own path can still hold someone else's files.
-   The script checks the source directory's owner and every file's owner, and **refuses the whole
-   download if anything belongs to another user**, naming the files and their owners. Narrow `--remote`
-   to a directory holding only the user's own results; never try to filter the foreign files out.
+   The check is done by **`find -user` on the cluster** (never by comparing owner names locally, where a
+   uid/name mix-up would flag the user's own files), after a `id -u <username>` pre-flight; an account
+   the HPC does not recognise stops the command. It **refuses the whole download if anything belongs to
+   another user**, naming the files. Narrow `--remote` to a directory holding only the user's own
+   results; never try to filter the foreign files out.
 
 Do not look for a way around either check.
 
