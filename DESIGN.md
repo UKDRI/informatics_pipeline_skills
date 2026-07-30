@@ -14,8 +14,8 @@
     non-default CPUs/memory/time.
 - **One operations skill — `slurm`** (§9) — which transfers those artifacts **and the run's input data**
   to the HPC, submits jobs (subject to a 100-job cap), reports job and pipeline status, cancels a job,
-  and removes an allow-listed intermediate artifact on request. It also carries a small job template for
-  unpacking compressed input archives on the cluster.
+  **downloads results back within a 2 GB cap**, and removes an allow-listed intermediate artifact on
+  request. It also carries a small job template for unpacking compressed input archives on the cluster.
 
 **A pipeline skill never executes a pipeline.** It only *generates* the artifacts above, and never
 shells out to `sbatch`, `ssh`, or `scp` itself. **The `slurm` skill (§9) is what actually starts a
@@ -629,15 +629,27 @@ e.g. bump process memory to `225.GB` for datasets exceeding 250,000 cells.
 
 `slurm` is the repository's single **operations skill** (§1) and the **only** place in the repo that
 touches the cluster. It is the only skill permitted to run `ssh`, `scp`/`rsync`, `sbatch`, `squeue`,
-`sacct`, `scontrol`, `scancel`, or `rm` against the HPC. Pipeline skills generate artifacts and stop (§1, §3 step 6);
+`sacct`, `scontrol`, `scancel`, `find`, or `rm` against the HPC. Pipeline skills generate artifacts and stop (§1, §3 step 6);
 `slurm` takes it from there:
 
 - **`transfer`** — push the generated files **and the run's input data** to the HPC (§9.4.0),
+- **`download`** — pull results back, bounded to **2 GB** with big files excluded (§9.4.6),
 - **`submit`** — submit the job script with `sbatch`,
 - **`job_status`** — report the SLURM state and where the pipeline currently is,
 - **`cancel`** — cancel one job by job id with `scancel`,
 - **`cleanup`** — remove one explicitly named path on request, restricted to the allow-listed
   artifact kinds in §9.4.1.
+
+**Scope of the rules — they are not about one script.** Everything in §9.2 and §9.3 binds **every
+cluster interaction, however it is issued**: a `slurm_ops.py` subcommand, and equally a raw `ssh`,
+`rsync`, or `scp` typed into a Bash call. There is no "quick one-off" exemption. Two consequences:
+
+- **Pulling data from the HPC is only ever done with `slurm_ops.py download`** (§9.4.6). Never
+  hand-roll an `rsync`/`scp` pull and run it yourself — that path has no scan, no size cap, and no
+  path guard.
+- Anything the skill cannot do within those rules is **handed to the user as a command they run** —
+  `transfer --print-only` (§9.4.0), the retrieval `rsync` (§9.4.2), the full-tree pull that a capped
+  download leaves behind (§9.4.6) — never worked around by issuing the command directly.
 
 It also ships one job template of its own, `templates/run_uncompress.sh`, for unpacking a `.zip` or
 `.tar.gz` input archive on the cluster (§9.4.5) — submitted through `submit` like any other job.
@@ -709,25 +721,34 @@ Destruction and mutation rules layered on top of the guard:
   shell (see §9.6).
 - When a path fails the guard, refuse the operation, name which check it failed, and ask the user for
   a conforming path. Never "fix" a path by appending or trimming components on your own.
+- **The guard applies to a read source, not just a write target.** A `download` source (§9.4.6), a log
+  path, a directory listing — all of them go through the same checks, so data is never *read* out of
+  another user's directory either. "It only reads" is not a reason to relax any rule here.
+- **Paths the cluster reports back are guarded too.** `scontrol`/`sacct` return a `WorkDir` and a
+  `StdOut` that the skill did not choose — a job may have been launched from a shared area. Check them
+  before reading them, and before offering one as a `cleanup` target: if such a path is outside the
+  user's own directories, **say so and do not read it** rather than following it. In code this is
+  `in_user_path()` / `require_user_path()`, the non-fatal form of the guard.
 
-### 9.4 The five subcommands
+### 9.4 The six subcommands
 
-One script, `scripts/slurm_ops.py`, with five `argparse` subcommands, so the credential prompt (§9.2)
-and the path guard (§9.3) live in one place instead of being duplicated. All five take `--user` and
+One script, `scripts/slurm_ops.py`, with six `argparse` subcommands, so the credential prompt (§9.2)
+and the path guard (§9.3) live in one place instead of being duplicated. All six take `--user` and
 `--host` (§9.2).
 
 | Subcommand | Does | Key rules |
 |---|---|---|
-| `transfer` | **Push only** (local → HPC): the run's text artifacts *and* its input data — see §9.4.0 for the list. `--print-only` prints the `rsync` command for the user to run instead of pushing | §9.3 guard on the remote directory; ask before creating it; ask before overwriting any existing remote file; **never pulls anything back** from the HPC |
+| `transfer` | **Upload** (local → HPC): the run's text artifacts *and* its input data — see §9.4.0 for the list. `--print-only` prints the `rsync` command for the user to run instead of pushing | §9.3 guard on the remote directory; ask before creating it; ask before overwriting any existing remote file; uploads only — the other direction is `download` |
+| `download` | **Download** (HPC → local): a results directory, scanned first, big files excluded, **capped at 2 GB total** (§9.4.6) | §9.3 guard on the **source** — never another user's directory; refuse rather than truncate when over the cap; confirmed by the user before it starts |
 | `submit` | `sbatch <script>` in the remote run directory | **Pre-flight the 100-job limit with `squeue -u` and refuse if the user is at the cap** (§9.4.3); after submission, **report the folder on the HPC and the job id** to the user — both, explicitly |
 | `job_status` | `sacct` / `scontrol show job <jobid>` | Report the state as one of **pending, running, complete, fail, node_fail**, plus the current pipeline step (§9.5) |
 | `cancel` | `scancel <jobid>` | One job id, never a mass cancel; confirm first; afterwards **suggest** a `cleanup` of that run's directory (§9.4.4) |
 | `cleanup` | `rm -rf <one explicit absolute path>` | §9.3 guard **and** the §9.4.1 allow-list — the target's own name must be a removable kind; the path comes from the user via `--path`; show the target (`ls`, `du -sh`) and require explicit confirmation before removing |
 
 **`transfer`** moves a run's text artifacts **and its input data** onto the cluster (§9.4.0). It is
-**push-only in direction, not in scope**: it never fetches results, logs, or reports back to the local
-machine — retrieval is a printed `rsync` command the user runs themselves (§9.4.2). A user who prefers
-to run the upload themselves gets the push command printed instead (`--print-only`, §9.4.0).
+**one-directional**: it uploads and never fetches. Getting results back is `download` (§9.4.6), or a
+printed `rsync` the user runs themselves (§9.4.2). A user who prefers to run the upload themselves gets
+the push command printed instead (`--print-only`, §9.4.0).
 
 **`submit`** always `cd`s into the directory holding the job script and runs `sbatch` **from there**,
 because the script's `-params-file params.yml` and `-c custom.config` are relative paths (§4.5). Refuse
@@ -781,9 +802,10 @@ in the §6 input chain that the user already holds locally:
   `rsync -avh` (add `-P` for `--partial --progress`, so an interrupted push resumes instead of
   restarting). Preserve the directory structure a samplesheet expects — a Cell Ranger `outs` tree or a
   `.d/` directory is only valid as a whole.
-- **Still push-only, still confirmed.** Every §9.3 rule holds for a data push: the remote destination
-  must pass the path guard, the directory is created only with permission, and **an existing remote file
-  or directory is never silently overwritten** — ask first. Nothing is ever pulled back (§9.4.2).
+- **Upload only, and confirmed.** Every §9.3 rule holds for a data push: the remote destination must
+  pass the path guard, the directory is created only with permission, and **an existing remote file or
+  directory is never silently overwritten** — ask first. `transfer` itself pulls nothing; that is
+  `download`'s job (§9.4.6).
 - **Say what it will cost before starting.** For a large push, report the local size (`du -sh`) and that
   the transfer runs on the user's connection until it finishes. Where the data is **public**, mention
   the cheaper route — download it directly on the cluster with the data-retrieval skills (`ena`, `geo`,
@@ -879,11 +901,20 @@ python3 scripts/slurm_ops.py cleanup --user <username> --host <hostname> \
 #   --path /data/<username>/project_1/results
 ```
 
-#### 9.4.2 Getting results back — the printed `rsync` hand-off
+#### 9.4.2 Getting results back — the two routes
 
-`transfer` is push-only (§9.4), so the skill never pulls results down. Instead, **once `job_status`
-reports the job `complete`, tell the user the exact `rsync` command to fetch the output directory
-themselves** — the pull counterpart of `transfer --print-only` (§9.4.0):
+There are exactly **two** ways results come back, and the user chooses:
+
+| Route | When | Who runs it |
+|---|---|---|
+| `download` (§9.4.6) | the wanted files fit in **2 GB** once big files are excluded | the skill, after the user confirms |
+| the `rsync` command below | anything larger, the complete tree including big files, or simply the user's preference | **the user**, on their own machine |
+
+**Always offer both** — state the size the scan found and let the user decide; never assume. And when
+`job_status` reports `complete`, volunteer them (§9.5) rather than waiting to be asked.
+
+This section is about the second route: **tell the user the exact `rsync` command** to fetch the output
+directory themselves — the pull counterpart of `transfer --print-only` (§9.4.0):
 
 ```bash
 # whole results directory — out/ plus the report and the job's own logs
@@ -911,9 +942,10 @@ rsync -avh <username>@<hostname>:/data/<username>/project_1/nfcore/scrnaseq/out 
   different local destination name.
 - The remote source is the path `submit` reported (§9.4) — quote it exactly; never guess a results path
   the skill has not seen.
-- The skill **prints the command; it does not run it.** It is the user's transfer, on their machine, in
+- The skill **prints this command; it does not run it.** It is the user's transfer, on their machine, in
   whatever directory they choose — never execute it for them, and never invent a local destination path
-  on their behalf.
+  on their behalf. A pull the skill performs itself goes through `download` (§9.4.6) and nothing else:
+  a hand-rolled `rsync`/`scp` pull run from Bash is forbidden (§9.1).
 - Suggest fetching results **before** any `cleanup` of `out`/`outs` (§9.4.1) — once removed, they are
   gone from the cluster.
 
@@ -1005,6 +1037,87 @@ lands an archive on the cluster uses the same template rather than inventing its
 - **The archive is not deleted afterwards.** Once the user has confirmed the unpacked data looks right,
   the `.zip`/`.tar.gz` is a normal `cleanup` candidate (§9.4.1) — an explicit, separately confirmed step.
 
+#### 9.4.6 Downloading results — `download` and the 2 GB cap
+
+The one route by which the skill itself pulls data off the cluster (§9.1). It is deliberately narrow:
+small enough to be safe and quick, with everything larger handed to the user as a command (§9.4.2).
+
+**Rule 0 — only the user's own results, checked two ways.** **Another user's data is never downloaded,
+and no flag overrides this.**
+
+1. **The path** must contain the username, under one of the §9.3 user-directory prefixes. The guard runs
+   on the source **before the scan**, so a foreign path is never even listed. It governs a *read* source
+   exactly as it governs a write target — "it's only reading" is never a reason to relax it.
+2. **The ownership** must match, because a path under `/data/<username>/…` can still hold files that
+   belong to someone else (a group-writable directory, a copy from a colleague). So:
+   - `stat -c %U` on the source directory — **refuse** if it is not owned by `--user`;
+   - the scan returns each file's owner (`find -printf '%s\t%U\t%p\n'`), and **any file owned by another
+     user is a hard stop**: report the offenders with their owners and refuse the whole download. Do not
+     filter them out and continue — an `--exclude` that silently drops files is how the wrong data gets
+     copied. Tell the user to narrow the source to a directory holding only their own results.
+
+Two further points the implementation honours:
+
+- **Never `-L` / `--copy-links`.** `rsync -avh` copies a symlink *as a symlink*, so a link inside the
+  results tree pointing at someone else's data is never dereferenced into the download. The scan uses
+  `find` without `-L` for the same reason, so scan and transfer agree on what is in scope.
+- A refusal names the rule and asks for a path under the user's own directory. It never offers a
+  workaround.
+
+**The flow — scan, exclude, check, confirm, pull:**
+
+1. **Scan** the source read-only: `find <dir> -type f -printf '%s\t%p\n'`, pruning the Nextflow scratch
+   dirs `work` and `.nextflow` unless `--include-work` is given.
+2. **Exclude big files** — anything larger than the per-file threshold (`--max-file-size`, default
+   **500 MB**). Report how many were excluded and their total size, listing the largest.
+3. **Check the total** of what remains against the **2 GB ceiling**.
+4. **Report the plan and stop**, as every state-changing subcommand does (§9.6) — a download writes to
+   the user's disk, so it is gated by `--confirm` too.
+5. **Pull** with `rsync -avh --max-size=<threshold> --exclude=work --exclude=.nextflow`. `--max-size`
+   uses rsync's 1024-based suffixes, the same arithmetic as the scan: the scan predicts, rsync enforces.
+
+**Over the cap → refuse.** If what remains after exclusion still exceeds 2 GB, **refuse and transfer
+nothing** — never a silently truncated subset. Print the total, the largest files still selected, and
+the three ways forward: narrow the source to a subdirectory, lower `--max-file-size`, or run the full
+`rsync` themselves. The same applies when *every* file is above the threshold: say so rather than
+running an empty transfer.
+
+**Limits are constants in `slurm_ops.py`** — `MAX_DOWNLOAD_BYTES` (a hard ceiling that no flag raises),
+`DEFAULT_MAX_FILE_SIZE_BYTES`, `DOWNLOAD_SKIP_DIRS` (`work`, `.nextflow`). Sizes are **1024-based**
+throughout, matching rsync's `K`/`M`/`G` suffixes: "2 GB" here means 2 GiB (`2 * 1024**3`) and "500 MB"
+means 500 MiB, so the scan's arithmetic and `--max-size` cannot disagree.
+
+**Local destination.** `--dest` defaults to the basename of `--remote`. It is created only as part of a
+confirmed download, and a **non-empty existing directory is refused** unless `--overwrite` is given —
+the same no-silent-overwrite rule `transfer` applies remotely (§9.3), because this direction writes to
+the user's own disk.
+
+**The flags**, all of which may tighten the limits and none of which loosen the 2 GB cap or Rule 0:
+`--remote` (source, guarded), `--dest`, `--max-file-size`, `--include-work`, `--progress` (adds `-P`
+for a resumable pull), `--overwrite`, `--confirm`, and **`--print-only`** — which prints both the
+scanned-subset command *and* the full-tree command and transfers nothing, the pull twin of
+`transfer --print-only` (§9.4.0). Offer `--print-only` whenever the user would rather drive the
+transfer themselves.
+
+**Hand back two things after every download** — always both:
+
+1. **The full-results `rsync`, large files included** — no `--max-size`, so it is the complete tree.
+   Print it whenever anything was excluded, and name what it would add (count and size from the scan) so
+   the user can judge whether it is worth it. **The user runs this; the skill never does.** The 2 GB cap
+   bounds what the *skill* transfers, not what the user may fetch.
+
+   ```bash
+   # everything, large files included — run this yourself
+   rsync -avhP <username>@<hostname>:/data/<username>/project_1/nfcore/scrnaseq scrnaseq
+   ```
+2. **A suggestion to `cleanup` once the data is verified locally** — typically that run's `work`
+   directory, with the reminder that removing `out`/`outs` is irreversible on the cluster. Two things
+   to get right here: `work`/`.nextflow` live in the **launch** directory, which is not necessarily the
+   directory just downloaded (§9.4.4, §9.5) — take the path from `scontrol`'s `WorkDir` rather than
+   assuming it sits under the results dir; and it stays a **suggestion**, going through `cleanup`'s own
+   allow-list, path guard, and confirmation (§9.3, §9.4.1). **Never chain a cleanup onto a download**,
+   and never run one just because a download succeeded.
+
 ### 9.5 Progress reporting from the logs
 
 `job_status` reports more than the raw SLURM state — it tells the user *where the pipeline is*:
@@ -1028,8 +1141,11 @@ lands an archive on the cluster uses the same template rather than inventing its
 in a loop, sleep and re-check, tail a log continuously, schedule a follow-up, or hold the session open
 waiting for a job to finish. The user asks whenever they want to know, passing the **job id that
 `submit` reported** (§9.4) — which is exactly why `submit` must state the job id and the HPC folder
-back to the user. Report the state and the current step once, then stop. When the state is `complete`,
-close the loop by printing the `rsync` retrieval command (§9.4.2).
+back to the user. Report the state and the current step once, then stop.
+
+When the state is `complete`, close the loop by offering **both** retrieval routes (§9.4.2) — the capped
+`download` (§9.4.6) and the full-tree `rsync` the user runs themselves — followed by the reminder that
+`cleanup` can free the run's scratch once the data is safely local. Offer; do not start either.
 
 ### 9.6 Python API — deltas from §7
 
@@ -1043,12 +1159,17 @@ The `slurm` skill keeps most of §7 but necessarily departs on two points:
   §7's determinism rule is replaced by: **echo every remote command to the user before it runs**, and
   **confirm every state-changing command** (create, overwrite, submit, remove) first (§9.3).
 - **How confirmation works — the `--confirm` gate.** Every state-changing subcommand (`transfer`,
-  `submit`, `cancel`, `cleanup`) runs in two steps: **without `--confirm` it does the read-only probes,
-  prints the exact plan — host, target paths, the command it would run, sizes — and exits changing
-  nothing.** The skill shows that plan to the user, and only after they agree does it re-run the same
-  command with `--confirm`. Never pass `--confirm` on the first invocation; the flag *is* the user's
-  permission, so inventing it defeats §9.3. Replacing existing remote files needs a second, separate
-  flag (`--overwrite`), and `job_status` is read-only and needs no gate.
+  `download`, `submit`, `cancel`, `cleanup`) runs in two steps: **without `--confirm` it does the
+  read-only probes, prints the exact plan — host, target paths, the command it would run, sizes — and
+  exits changing nothing.** The skill shows that plan to the user, and only after they agree does it
+  re-run the same command with `--confirm`. Never pass `--confirm` on the first invocation; the flag
+  *is* the user's permission, so inventing it defeats §9.3. Replacing files that already exist needs a
+  second, separate flag (`--overwrite`) — remote ones for `transfer`, a non-empty local directory for
+  `download` — and `job_status` is read-only and needs no gate.
+- **Limits live in named constants**, never inline: `MAX_JOBS` (§9.4.3), `MAX_DOWNLOAD_BYTES` and
+  `DEFAULT_MAX_FILE_SIZE_BYTES` and `DOWNLOAD_SKIP_DIRS` (§9.4.6), the cleanup allow-list sets
+  (§9.4.1), and `USER_DIR_PREFIXES` (§9.3). A cap may be tightened by a flag but **never raised past
+  its constant** — `MAX_DOWNLOAD_BYTES` in particular has no override.
 - Shell out to the system `ssh` / `scp` / `rsync` binaries via `subprocess` with an **argument list,
   never `shell=True`** — that is what makes the quoting rule in §9.3 enforceable. No third-party SSH
   library.

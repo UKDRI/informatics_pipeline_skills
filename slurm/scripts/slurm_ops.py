@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cluster operations for the UKDRI SLURM HPC: transfer, submit, job_status, cancel, cleanup.
+"""Cluster operations for the UKDRI SLURM HPC: transfer, download, submit, job_status, cancel, cleanup.
 
 The operations skill of this repository (see repo DESIGN.md §9). Pipeline skills
 generate a job script + params.yml and stop; this script is what puts them on the
@@ -11,9 +11,14 @@ Hard rules implemented here (DESIGN.md §9.2, §9.3):
   * No passwords, ever: ssh/rsync run with BatchMode=yes, so an unconfigured host
     fails fast instead of prompting. Passwordless SSH is the user's own setup.
   * Every remote path must sit inside one of the user's own standard directories,
-    at least one level below it, absolute and glob-free.
+    at least one level below it, absolute and glob-free. This applies to a download
+    SOURCE as much as to a write target: data is never pulled from another user's
+    directory, and there is no flag to override that.
   * Nothing is created, overwritten, or deleted without --confirm: without it every
-    state-changing subcommand prints its plan and stops.
+    state-changing subcommand prints its plan and stops. A download writes to the
+    local disk, so it is gated the same way.
+  * A download is capped at MAX_DOWNLOAD_BYTES in total with big files excluded; it
+    is refused, never silently truncated, when the scan comes out over the cap.
   * Every remote command is echoed before it runs.
 
 Stdlib only.
@@ -46,6 +51,14 @@ USER_DIR_PREFIXES = (
 
 # A user may have at most this many jobs in the queue (running + pending).
 MAX_JOBS = 100
+
+# `download` limits. The total is a hard ceiling: no flag raises it. Files above the
+# per-file threshold are excluded from what the skill pulls; the user fetches those
+# themselves with the full rsync command the skill prints.
+MAX_DOWNLOAD_BYTES = 2 * 1024 ** 3              # 2 GiB total per download
+DEFAULT_MAX_FILE_SIZE_BYTES = 500 * 1024 ** 2   # "big file" = larger than 500 MiB
+# Nextflow scratch: never part of a results download unless explicitly asked for.
+DOWNLOAD_SKIP_DIRS = ("work", ".nextflow")
 
 # What `cleanup` may remove — matched on the final path component.
 CLEANUP_DIR_NAMES = {"work", "out", "outs", "sra", "fastq", ".nextflow"}
@@ -109,6 +122,29 @@ def die_needs_confirm(what: str) -> "NoReturn":  # type: ignore[name-defined]
     raise SystemExit(0)
 
 
+def human_size(num: int) -> str:
+    """Bytes as a short 1024-based string, matching rsync's K/M/G suffixes."""
+    value = float(num)
+    for unit in ("B", "K", "M", "G", "T"):
+        if value < 1024 or unit == "T":
+            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+        value /= 1024
+    return f"{value:.1f}T"
+
+
+def parse_size(text: str) -> int:
+    """'500M' / '2G' / '1048576' -> bytes (1024-based, as rsync reads them)."""
+    s = text.strip().upper().rstrip("B")
+    if not s:
+        die(f"could not read a size from {text!r}")
+    mult = {"K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}.get(s[-1])
+    number = s[:-1] if mult else s
+    try:
+        return int(float(number) * (mult or 1))
+    except ValueError:
+        die(f"could not read a size from {text!r} — use forms like 500M, 2G, or a byte count.")
+
+
 # --------------------------------------------------------------------------- #
 # Path guard (DESIGN.md §9.3)
 # --------------------------------------------------------------------------- #
@@ -154,6 +190,38 @@ def guard_path(path: str, username: str) -> str:
         f"remote path {clean!r} is outside the user's own directories (§9.3 rule 2). "
         f"It must contain the username {username!r} under one of: {allowed}"
     )
+
+
+def in_user_path(path: str, username: str) -> bool:
+    """True if `path` passes the §9.3 guard — without exiting on failure.
+
+    For paths the CLUSTER hands back (scontrol WorkDir/StdOut, sacct fields): they
+    are checked before being read or offered, so a job that ran outside the user's
+    own directories is reported rather than followed.
+    """
+    if not path or not path.startswith("/") or "~" in path or "$" in path:
+        return False
+    if any(c in path for c in GLOB_CHARS):
+        return False
+    clean = posixpath.normpath(path)
+    if ".." in clean.split("/"):
+        return False
+    return any(
+        clean.startswith(f"{prefix}/{username}/") for prefix in USER_DIR_PREFIXES
+    )
+
+
+def require_user_path(path: str, username: str, what: str) -> str:
+    """Guard a cluster-reported path before reading it; empty string if it fails."""
+    if not path:
+        return ""
+    if not in_user_path(path, username):
+        warn(
+            f"{what} is outside {username}'s own directories: {path} — not reading it "
+            "(§9.3 applies to paths the cluster reports back, not just paths you type)."
+        )
+        return ""
+    return path
 
 
 def cleanup_kind_allowed(path: str, kind: str) -> tuple[bool, str]:
@@ -336,6 +404,202 @@ def cmd_transfer(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# download (DESIGN.md §9.4.6)
+# --------------------------------------------------------------------------- #
+def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list:
+    """[(size, owner, path), ...] for every regular file under `path`.
+
+    Read-only. `find` is used WITHOUT -L, so a symlink pointing at another user's
+    data is never followed — matching `rsync -a`, which copies it as a symlink.
+    The owner comes back with each file so the caller can verify the results really
+    belong to the user (§9.4.6 rule 0), not merely sit under their path.
+    """
+    argv = ["find", path]
+    for name in skip_dirs:
+        argv += ["-name", name, "-prune", "-o"]
+    argv += ["-type", "f", "-printf", "%s\\t%U\\t%p\\n"]
+
+    out = remote_text(user, host, argv)
+    entries = []
+    for line in out.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue                      # ignore anything not size<TAB>owner<TAB>path
+        try:
+            entries.append((int(parts[0]), parts[1], parts[2]))
+        except ValueError:
+            continue
+    return entries
+
+
+def remote_owner(user: str, host: str, path: str) -> str:
+    """Owner of one remote path, or '' if it could not be read."""
+    return remote_text(user, host, ["stat", "-c", "%U", path]).strip()
+
+
+def full_rsync_hint(user: str, host: str, remote: str, dest: str) -> list:
+    """The user's own command for the COMPLETE tree, large files included."""
+    return ["rsync", "-avhP", f"{target(user, host)}:{remote}", dest]
+
+
+def cmd_download(args: argparse.Namespace) -> None:
+    # Rule 0: the source must be inside the user's OWN directory. guard_path runs
+    # first, so another user's path is refused before anything is even listed.
+    remote = guard_path(args.remote, args.user)
+
+    if remote_kind(args.user, args.host, remote) != "dir":
+        die(f"remote path is not a directory on the cluster: {remote}")
+
+    # Rule 0, second half: the results must BELONG to the user, not merely sit under a
+    # path containing their name. A directory owned by someone else is refused here.
+    owner = remote_owner(args.user, args.host, remote)
+    if owner and owner != args.user:
+        die(
+            f"refusing to download {remote}: it is owned by {owner!r}, not {args.user!r}. "
+            "This skill only downloads the user's own results. Ask the owner for the data, or "
+            "give a path under your own directory."
+        )
+
+    max_file = parse_size(args.max_file_size) if args.max_file_size \
+        else DEFAULT_MAX_FILE_SIZE_BYTES
+    skip_dirs = () if args.include_work else DOWNLOAD_SKIP_DIRS
+
+    dest = args.dest or posixpath.basename(remote)
+    local_hint = full_rsync_hint(args.user, args.host, remote, dest)
+
+    # 1. scan
+    info(f"Scanning {remote} ...")
+    entries = remote_file_sizes(args.user, args.host, remote, skip_dirs)
+    if not entries:
+        die(f"no files found under {remote} (nothing to download).")
+
+    # 2a. any file owned by someone else is a hard stop, not something to filter around:
+    #     rsync would copy it, and this skill never pulls another user's data.
+    foreign = sorted(((s, o, p) for s, o, p in entries if o != args.user), reverse=True)
+    if foreign:
+        info("")
+        info(f"  files owned by another user : {len(foreign)}")
+        for size, own, path in foreign[:10]:
+            info(f"      {human_size(size):>8}  [{own}]  {path}")
+        if len(foreign) > 10:
+            info(f"      ... and {len(foreign) - 10} more")
+        die(
+            f"refusing to download {remote}: it contains {len(foreign)} file(s) owned by another "
+            f"user (see above), and this skill only pulls {args.user}'s own data. Narrow --remote "
+            "to a subdirectory that holds only your results."
+        )
+
+    # 2b. exclude the big ones
+    selected = [(s, p) for s, _, p in entries if s <= max_file]
+    excluded = sorted(((s, p) for s, _, p in entries if s > max_file), reverse=True)
+    total = sum(s for s, _ in selected)
+    excluded_total = sum(s for s, _ in excluded)
+
+    info("")
+    info(f"Scan of {remote}")
+    info(f"  files found      : {len(entries)}")
+    if skip_dirs:
+        info(f"  skipped dirs     : {', '.join(skip_dirs)} (Nextflow scratch)")
+    if excluded:
+        info(f"  excluded >{human_size(max_file)}   : {len(excluded)} files, "
+             f"{human_size(excluded_total)}")
+        for size, path in excluded[:10]:
+            info(f"      {human_size(size):>8}  {path}")
+        if len(excluded) > 10:
+            info(f"      ... and {len(excluded) - 10} more")
+    info(f"  would download   : {len(selected)} files, {human_size(total)} "
+         f"(cap {human_size(MAX_DOWNLOAD_BYTES)})")
+
+    # 3a. nothing left after exclusion: say so instead of running an empty rsync
+    if not selected:
+        info("")
+        info("To get this data, either:")
+        info(f"  * raise the per-file limit : --max-file-size {human_size(entries[0][0])}"
+             " (the total cap still applies)")
+        info("  * fetch it yourself        : " + " ".join(shlex.quote(a) for a in local_hint))
+        die(
+            f"every file under {remote} is larger than {human_size(max_file)}, so there is "
+            "nothing for this skill to download. Nothing was transferred."
+        )
+
+    # 3b. the cap is absolute — refuse rather than truncate the file set
+    if total > MAX_DOWNLOAD_BYTES:
+        info("")
+        info("  largest files still selected:")
+        for size, path in sorted(selected, reverse=True)[:10]:
+            info(f"      {human_size(size):>8}  {path}")
+        info("")
+        info("To get this data, either:")
+        info(f"  * narrow the download   : --remote {remote}/<subdirectory>")
+        info(f"  * exclude more          : --max-file-size 100M")
+        info("  * fetch it yourself     : " + " ".join(shlex.quote(a) for a in local_hint))
+        die(
+            f"refusing to download {human_size(total)} — over the "
+            f"{human_size(MAX_DOWNLOAD_BYTES)} limit. Nothing was transferred."
+        )
+
+    argv = ["rsync", "-avh"]
+    if args.progress:
+        argv.append("-P")
+    argv.append(f"--max-size={max_file}")
+    for name in skip_dirs:
+        argv.append(f"--exclude={name}")
+    argv += ["-e", "ssh " + " ".join(SSH_OPTS)]
+    argv += [f"{target(args.user, args.host)}:{remote}", dest]
+
+    if args.print_only:
+        info("")
+        info("Run this yourself to download the scanned files (nothing has been transferred):")
+        info("  " + " ".join(shlex.quote(a) for a in argv))
+        info("")
+        info("Or the complete tree, large files included:")
+        info("  " + " ".join(shlex.quote(a) for a in local_hint))
+        return
+
+    # 4. plan + local destination checks (a download writes to the user's disk)
+    info("")
+    info("Download plan:")
+    info(f"  from    : {target(args.user, args.host)}:{remote}")
+    info(f"  into    : {dest}")
+    info(f"  size    : {human_size(total)} in {len(selected)} files")
+    info("  command : " + " ".join(shlex.quote(a) for a in argv))
+
+    if os.path.exists(dest):
+        if not os.path.isdir(dest):
+            die(f"local destination exists but is not a directory: {dest}")
+        existing = os.listdir(dest)
+        if existing and not args.overwrite:
+            info(f"  NOTE: {dest} already exists and holds {len(existing)} entries.")
+            die(
+                f"refusing to write into the non-empty directory {dest}. Choose another "
+                "--dest, or re-run with --overwrite if replacing its contents is intended."
+            )
+
+    if not args.confirm:
+        die_needs_confirm("The files above would be downloaded to this machine.")
+
+    os.makedirs(dest, exist_ok=True)
+    run_local(argv)
+
+    # 5. hand back: the full-tree command, then the cleanup suggestion (never run here)
+    info("")
+    info(f"Downloaded {human_size(total)} into {dest}")
+    if excluded:
+        info("")
+        info(f"{len(excluded)} large files ({human_size(excluded_total)}) were NOT downloaded. "
+             "To fetch the complete tree, large files included, run this yourself:")
+        info("  " + " ".join(shlex.quote(a) for a in local_hint))
+    info("")
+    info("Once you have verified the data locally, the run's intermediate files can be removed from "
+         "the cluster with `cleanup` — it shows a plan and asks before deleting anything:")
+    info(f"  slurm_ops.py cleanup --user {args.user} --host {args.host} --path <run dir>/work")
+    info("The work/ and .nextflow/ directories sit in the directory the job was LAUNCHED from, "
+         "which is not necessarily this one — take the path from `scontrol show job <jobid>` "
+         "(WorkDir), or from job_status. Removing out/ or outs/ is irreversible on the cluster, so "
+         "only clean up what you no longer need there.")
+
+
+# --------------------------------------------------------------------------- #
 # submit (DESIGN.md §9.4, §9.4.3)
 # --------------------------------------------------------------------------- #
 def queued_job_count(user: str, host: str) -> int:
@@ -469,9 +733,15 @@ def cmd_job_status(args: argparse.Namespace) -> None:
     state = normalise_state(raw_state)
 
     jobname = fields.get("JobName") or sacct_field(args.user, args.host, jobid, "JobName")
-    workdir = fields.get("WorkDir") or sacct_field(args.user, args.host, jobid, "WorkDir")
-    stdout_path = fields.get("StdOut", "")
     elapsed = fields.get("RunTime") or sacct_field(args.user, args.host, jobid, "Elapsed")
+
+    # Paths reported BY the cluster get the same guard as paths the user types: a job
+    # that ran outside the user's own directories is reported, not read (§9.3).
+    raw_workdir = fields.get("WorkDir") or sacct_field(args.user, args.host, jobid, "WorkDir")
+    workdir = require_user_path(raw_workdir, args.user, "the job's work directory")
+    stdout_path = require_user_path(
+        fields.get("StdOut", ""), args.user, "the job's SLURM output file"
+    )
 
     info("")
     info(f"Job {jobid} ({jobname or 'unknown name'})")
@@ -511,13 +781,19 @@ def cmd_job_status(args: argparse.Namespace) -> None:
              "(the run may not have started, or was launched elsewhere).")
 
     if state == "complete":
-        results = posixpath.dirname(workdir) if workdir else ""
         info("")
-        info("Job is complete. Fetch the results yourself with:")
+        info("Job is complete. Two ways to get the results — both need your go-ahead:")
         base = posixpath.basename(workdir) if workdir else "results"
-        info(f"  rsync -avh {target(args.user, args.host)}:{workdir or '<results dir>'} {base}")
-        if results:
-            info("  (that directory holds out/, the nextflow report, and the job's own logs)")
+        if workdir:
+            info(f"  * through this skill (max {human_size(MAX_DOWNLOAD_BYTES)}, large files "
+                 "excluded; shows a plan first):")
+            info(f"      slurm_ops.py download --user {args.user} --host {args.host} "
+                 f"--remote {workdir}")
+        info("  * the complete tree, large files included — run this yourself:")
+        info(f"      rsync -avhP {target(args.user, args.host)}:{workdir or '<results dir>'} {base}")
+        info("  (that directory holds out/, the nextflow report, and the job's own logs)")
+        info("Once the data is safely local, `cleanup` can remove the run's work/ from the "
+             "cluster — it asks before deleting anything.")
     elif state in ("fail", "node_fail"):
         info("")
         info(f"Job did not succeed ({state}). The SLURM .out and .nextflow.log above are in the "
@@ -564,7 +840,9 @@ def cmd_cancel(args: argparse.Namespace) -> None:
     info(f"Cancelled job {jobid}" + (f" ({jobname})" if jobname else "") + ".")
 
     # Suggest — never perform — cleanup of the half-finished run (DESIGN.md §9.4.4).
-    if workdir:
+    # Only suggest a path that itself passes the guard: the work dir comes from the
+    # cluster, so it is checked before being offered as a deletion target.
+    if in_user_path(workdir, args.user):
         workpath = posixpath.join(workdir, "work")
         info("")
         info("A cancelled Nextflow run leaves its work directory and .nextflow cache on disk.")
@@ -638,12 +916,15 @@ def add_common(sub: argparse.ArgumentParser, confirmable: bool = True) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="UKDRI SLURM cluster operations: transfer, submit, job_status, cancel, cleanup.",
+        description="UKDRI SLURM cluster operations: transfer, download, submit, job_status, "
+                    "cancel, cleanup.",
         epilog="Passwordless SSH must already be configured by the user; no passwords are used.",
     )
     subs = ap.add_subparsers(dest="cmd", required=True)
 
-    p = subs.add_parser("transfer", help="push job scripts and input data to the HPC (push only)")
+    p = subs.add_parser("transfer",
+                        help="push job scripts and input data to the HPC (upload; see download "
+                             "for the other direction)")
     add_common(p)
     p.add_argument("--path", action="append", required=True,
                    help="local file or directory to push (repeatable)")
@@ -655,6 +936,29 @@ def main() -> None:
     p.add_argument("--overwrite", action="store_true",
                    help="allow replacing files that already exist at the destination")
     p.set_defaults(func=cmd_transfer)
+
+    p = subs.add_parser(
+        "download",
+        help=f"pull results from the HPC — max {human_size(MAX_DOWNLOAD_BYTES)} total, "
+             "big files excluded",
+    )
+    add_common(p)
+    p.add_argument("--remote", required=True,
+                   help="remote results directory to download (must be under the user's own "
+                        "directory; another user's path is refused)")
+    p.add_argument("--dest", help="local destination directory (default: basename of --remote)")
+    p.add_argument("--max-file-size", default=None,
+                   help=f"exclude files larger than this (default "
+                        f"{human_size(DEFAULT_MAX_FILE_SIZE_BYTES)}; e.g. 100M)")
+    p.add_argument("--include-work", action="store_true",
+                   help="also include the Nextflow work/ and .nextflow/ scratch dirs")
+    p.add_argument("--print-only", action="store_true",
+                   help="print the rsync command for the user to run; download nothing")
+    p.add_argument("--progress", action="store_true",
+                   help="add -P (--partial --progress) for large or resumed transfers")
+    p.add_argument("--overwrite", action="store_true",
+                   help="allow writing into a non-empty local destination")
+    p.set_defaults(func=cmd_download)
 
     p = subs.add_parser("submit", help="submit a job script with sbatch from its own directory")
     add_common(p)
