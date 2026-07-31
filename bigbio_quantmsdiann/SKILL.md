@@ -28,17 +28,20 @@ Pinned version: 2.2.0 (`main` branch).
   reads acquisition method, labelling, enzyme, modifications and mass tolerances from the SDRF, and
   downloads/locates the spectrum files referenced in it. If missing, direct the user to the `pride`
   skill first; do not fabricate one.
-- **Protein database** (`database`) — a protein sequence FASTA (`.fasta`/`.fa`) on the cluster.
-  This is mandatory and is never part of the SDRF, so it must be supplied via `params.yml`. For DIA
-  data the FASTA **must not** contain decoys (DIA-NN creates them internally); include contaminants
-  as needed. If the user has not given a FASTA path, ask for it before building.
+- **Protein database** (`database`) — a protein sequence FASTA (`.fasta`/`.fa`) on the cluster. This
+  is mandatory and is never part of the SDRF. It is supplied by **species**: pass `--species mouse` or
+  `--species human` and `build_job.py` fills the UniProt reference proteome from the shared
+  `<repo-root>/assets/genomes.json` (see "Species selection" below). For any other proteome, give the
+  path with `--set database=...`. For DIA data the FASTA **must not** contain decoys (DIA-NN creates
+  them internally); include contaminants as needed.
 
 ## 3. Gather parameters
-Ask the user for: the SDRF path (`.sdrf.tsv`), a results directory on `/data`, and the protein
-`database` FASTA path. Then any non-default DIA-NN / search parameters (e.g. `precursor_mass_tolerance`,
-`fragment_mass_tolerance`, `pg_level`, `scoring_mode`, a precomputed `speclib`). There is no UKDRI
-house recommendation for this pipeline yet, so the only value pre-set in `templates/params.yml` is
-the mandatory `database` (an example path the user must edit).
+Ask the user for: the SDRF path (`.sdrf.tsv`), a results directory on `/data`, and the **species**
+(`--species mouse|human`, which fills the mandatory `database`) — or an explicit `database` FASTA path
+for any other proteome. Then any non-default DIA-NN / search parameters (e.g.
+`precursor_mass_tolerance`, `fragment_mass_tolerance`, `pg_level`, `scoring_mode`, a precomputed
+`speclib`). There is no UKDRI house recommendation for this pipeline yet, so `templates/params.yml`
+pre-sets nothing.
 
 ## 4. Generate `params.yml` (+ optional custom config)
 Run the skill's Python API, which validates every key/value against
@@ -48,11 +51,12 @@ Run the skill's Python API, which validates every key/value against
 python3 scripts/build_job.py \
     --input /data/$USER/PROJECT/PXD000000.sdrf.tsv \
     --resdir /data/$USER/PROJECT/quantmsdiann \
-    --set database=/data/$USER/databases/UP000005640_9606.fasta \
+    --species human \
     --dest /data/$USER/PROJECT/quantmsdiann
 ```
-- `database` is required and has no default; leave the template's example in place only after
-  editing it to a real FASTA, or override with `--set database=...`.
+- `database` is required and has no default. It is filled from `--species`; if no species can be
+  resolved and no `--set database=...` is given, the build **hard-errors** rather than emitting a
+  `params.yml` with no search database.
 - Add non-default search/DIA-NN options with more `--set key=value` flags, e.g.
   `--set pg_level=1` or `--set scoring_mode=proteoforms` (must be one of the schema enum:
   `generic`, `proteoforms`, `peptidoforms`).
@@ -74,6 +78,21 @@ the HPC, submits `run_bigbio_quantmsdiann.sh` with `sbatch` (from the directory 
 which the script references by relative path), and reports the job id. That skill also unpacks a
 compressed PRIDE download (`.zip`/`.tar.gz`) on the cluster if the `.raw`/`.d` data still needs
 extracting. Running `sbatch` by hand is equally fine. Never submit the job yourself from this skill.
+
+## Species selection
+`--species mouse|human` fills the mandatory `database` from the shared
+`<repo-root>/assets/genomes.json` (key `protein_fasta` — the UniProt reference proteome for that
+species). Override it with `--set database=/path/to/proteins.fasta`, which always wins.
+
+If `--species` is omitted, it is inferred from a species/organism column in the `--input` SDRF (or a
+`--metadata file.tsv`); scientific names such as *Mus musculus* / *Homo sapiens* are recognised, and a
+file mixing species is not auto-selected.
+
+**A database is required.** If no species can be resolved and no `--set database=` is given, the build
+hard-errors rather than emitting a `params.yml` without a search database.
+
+To point at a different proteome release, edit `<repo-root>/assets/genomes.json` only — it is shared by
+every species-dependent skill and no Python change is needed.
 
 ## Custom-config recommendations
 (None specific to quantmsdiann yet. DIA-NN in-silico library generation and quantification can be

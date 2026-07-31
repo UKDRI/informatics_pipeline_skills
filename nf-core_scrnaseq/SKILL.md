@@ -19,14 +19,17 @@ what the **`slurm` skill** uses to transfer the run to the HPC and submit it wit
 - **`samplesheet.csv`** — prepared beforehand (see the `ena`/`geo`/`arrayexpress` skills). Columns:
   `sample,fastq_1,fastq_2,expected_cells` (`expected_cells` = expected number of cells per sample;
   a sample split across lanes uses one row per fastq pair with the same `sample` name).
-- **Genome reference** — a genome `fasta` and matching `gtf` annotation (paths on the cluster).
-  With the recommended `cellranger` aligner the reference must be **10x-compatible** (Cell Ranger
-  builds/uses its own reference from the `fasta`/`gtf`); if missing, ask the user for them before
-  building.
+- **Genome reference** — supplied by **species**: pass `--species mouse` or `--species human` and
+  `build_job.py` fills the matching `fasta`+`gtf` from the shared `<repo-root>/assets/genomes.json`
+  (see "Species selection" below). Cell Ranger builds its own reference from that `fasta`/`gtf`, so the
+  standard pair works with the recommended `aligner: cellranger`. For any other genome, give explicit
+  paths with `--set fasta=... --set gtf=...`. `templates/params.yml` seeds neither, so **the build
+  hard-errors** if no species can be resolved and neither path was set.
 
 ## 3. Gather parameters
-Ask the user for: the samplesheet path, a results directory on `/data`, the genome `fasta`/`gtf`,
-and any non-default parameters. The **recommended** aligner is `cellranger` (pipeline default is
+Ask the user for: the samplesheet path, a results directory on `/data`, the **species**
+(`--species mouse|human` — or explicit `fasta`/`gtf` paths for any other genome), and any non-default
+parameters. The **recommended** aligner is `cellranger` (pipeline default is
 `simpleaf`) — it is pre-set in `templates/params.yml`; confirm or override.
 
 ## 4. Generate `params.yml` (+ optional custom config)
@@ -37,8 +40,7 @@ Run the skill's Python API, which validates every key/value against
 python3 scripts/build_job.py \
     --input /data/$USER/PROJECT/samplesheet.csv \
     --resdir /data/$USER/PROJECT/scrnaseq \
-    --set fasta=/data/$USER/genomes/genome.fa.gz \
-    --set gtf=/data/$USER/genomes/genes.gtf.gz \
+    --species mouse \
     --dest /data/$USER/PROJECT/scrnaseq
 ```
 - Override the recommended aligner with `--set aligner=simpleaf` (must be one of the schema
@@ -63,8 +65,11 @@ cluster by hand is equally fine. Never submit the job yourself from this skill.
 numbers or many samples as needed — see DESIGN.md §4.6.)
 
 ## Species selection
-Pass `--species mouse|human` to `build_job.py` to auto-fill the genome `fasta`+`gtf`
-(mm39 / hg38, Ensembl release-115). Override with `--set fasta=... --set gtf=...`. Note the
+Pass `--species mouse|human` to `build_job.py` to auto-fill the genome `fasta`+`gtf` from the shared
+`<repo-root>/assets/genomes.json`. Cell Ranger runs its own `mkref` on that pair, so it satisfies the
+10x requirement. Override with `--set fasta=... --set gtf=...`. To add a species or bump a reference
+release, edit `genomes.json` only. If neither a species nor explicit paths can be resolved, the build
+hard-errors rather than writing a `params.yml` with no genome. Note the
 recommended `aligner: cellranger` also needs a matching 10x-compatible reference.
 
 If `--species` is omitted, it is inferred from a species/organism column in the samplesheet (or a `--metadata file.tsv`); scientific names such as *Mus musculus* / *Homo sapiens* are recognised. A file mixing species is not auto-selected — pass `--species` explicitly.

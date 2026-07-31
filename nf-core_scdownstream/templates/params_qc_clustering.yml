@@ -1,7 +1,11 @@
 # params.yml — nf-core:scdownstream (entry: qc_clustering)
 # Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
+#
+# `species` is NOT seeded here: it is filled from --species mouse|human, and build_job.py
+# hard-errors if no species can be resolved. Seeding it would silently run human data as
+# mouse whenever --species was forgotten.
+# NOTE: celltypist_model below is MOUSE-specific — change it when running human data.
 name: scdownstream
-species: mouse
 celltypist_model: Mouse_Whole_Brain
 clustering_resolutions: "0.1,0.3,0.5,0.7,1.0,1.5,2.0,2.5,3.0"
 automatic_cell_filtering: true

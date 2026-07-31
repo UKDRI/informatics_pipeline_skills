@@ -1,8 +1,16 @@
-# params.yml — nf-core:differentialabundance (UKDRI fork, dev_ukdri @ 163d07f)
-# Only parameters that differ from the pipeline defaults (validated against
-# ../assets/nextflow_schema.json). Edit the paths/values below, or override with --set.
-# NOTE: --input (the observations samplesheet) and --outdir are CLI flags in the
-# run script, NOT here. study_type defaults to 'rnaseq' so it is omitted.
+# params.yml — nf-core:differentialabundance (UKDRI fork, dev_ukdri @ 4c3883c)
+# Base recommended non-default values, applied to every run and overridable with --set.
+# Validated against ../assets/nextflow_schema.json.
+#
+# Assay-specific values are layered on top of this file from templates/params_<study_type>.yml
+# (e.g. params_mass_spec.yml), selected by --study-type. Species-dependent paths (gtf,
+# gene_sets_files, gprofiler2_background_file) come from --species mouse|human via the shared
+# <repo-root>/assets/genomes.json. See SKILL.md.
+#
+# NOTE: --input (the observations samplesheet) and --outdir are CLI flags in the run script,
+# NOT here. EDIT the three paths/names below, or override each with --set.
 contrasts: /data/$USER/PROJECT/contrasts.csv    # CSV: variable,reference,target,blocking
 matrix: /data/$USER/PROJECT/matrix.tsv          # TSV abundance matrix (features x samples)
 study_name: my_study                            # identifier for results (default: study)
+gprofiler2_run: true      # gprofiler2 gene-set enrichment; --set gprofiler2_run=false to skip
+gprofiler2_min_diff: 5    # min differentially abundant genes in a set for it to count (default: 1)

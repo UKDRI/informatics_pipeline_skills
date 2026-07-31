@@ -1,0 +1,6 @@
+# Python bytecode, created whenever a build_job.py is imported or run
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store

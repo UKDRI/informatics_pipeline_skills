@@ -2,8 +2,14 @@
 # Only parameters that differ from the pipeline defaults (validated against
 # ../assets/nextflow_schema.json).
 #
-# `database` is REQUIRED and has no default: it must always be set to a protein
-# FASTA (.fasta/.fa) on the cluster. For DIA data the FASTA must NOT contain
-# decoys (they are generated internally). Include contaminants as needed.
-# EDIT this to your protein database, or override with --set database=...
-database: /data/$USER/databases/uniprot/UP000005640_9606.fasta
+# `database` is REQUIRED and has no default. It is NOT seeded here: it is filled from
+# --species mouse|human out of the shared <repo-root>/assets/genomes.json (the UniProt
+# reference proteome, key `protein_fasta`). Pass --species, or give a custom FASTA with
+# --set database=/path/to/proteins.fasta — build_job.py hard-errors if neither is given.
+#
+# For DIA data the FASTA must NOT contain decoys (DIA-NN generates them internally).
+# Include contaminants as needed.
+#
+# There is no other UKDRI house recommendation for this pipeline yet, so this file is
+# otherwise empty: every remaining parameter stays at its pipeline default unless you
+# add it with --set.

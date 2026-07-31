@@ -1,6 +1,11 @@
 # params.yml — nf-core:scdownstream (entry: downstream)
 # Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
+#
+# `species` is NOT seeded here: it is filled from --species mouse|human, and build_job.py
+# hard-errors if no species can be resolved. Seeding it would silently run human data as
+# mouse whenever --species was forgotten. For this entry --input is an .h5ad, which cannot
+# be scanned for an organism column, so use --species or --metadata file.tsv.
+# NOTE: celltypist_model below is MOUSE-specific — change it when running human data.
 name: scdownstream
-species: mouse
 selected_clustering: leiden_1.0
 celltypist_model: Mouse_Whole_Brain

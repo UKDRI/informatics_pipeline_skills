@@ -48,12 +48,15 @@ Run order: `run_nfcore_scdownstream_qc_clustering.sh` first; its output
 
 ## 4. Gather parameters
 Ask the user for: the input path (samplesheet for `qc_clustering`, the finalized `.h5ad` for
-`downstream`), a results directory on `/data`, and any non-default parameters. Common non-defaults
-(pre-set in the shipped `templates/params_<entry>.yml`, confirm or override):
+`downstream`), a results directory on `/data`, the **species** (`--species mouse|human`), and any
+non-default parameters. Common non-defaults (pre-set in the shipped `templates/params_<entry>.yml`,
+confirm or override):
 
-- `qc_clustering`: `name`, `species`, `celltypist_model`, `clustering_resolutions`,
-  `automatic_cell_filtering`.
-- `downstream`: `name`, `species`, `selected_clustering`, `celltypist_model`.
+- `qc_clustering`: `name`, `celltypist_model`, `clustering_resolutions`, `automatic_cell_filtering`.
+- `downstream`: `name`, `selected_clustering`, `celltypist_model`.
+
+`species` is **not** pre-set — it comes from `--species` (see "Species selection"). Note the shipped
+`celltypist_model` (`Mouse_Whole_Brain`) is mouse-specific: change it with `--set` for human data.
 
 ## 5. Generate `params_<entry>.yml` (+ optional custom config)
 Run the skill's Python API with `--entry`. It validates every key/value against
@@ -62,6 +65,7 @@ Run the skill's Python API with `--entry`. It validates every key/value against
 **qc_clustering:**
 ```bash
 python3 scripts/build_job.py --entry qc_clustering \
+    --species mouse \
     --input /data/$USER/PROJECT/scdownstream/samplesheet_scdownstream.csv \
     --resdir /data/$USER/PROJECT/scdownstream/qc_clustering \
     --dest   /data/$USER/PROJECT/scdownstream/qc_clustering
@@ -70,6 +74,7 @@ python3 scripts/build_job.py --entry qc_clustering \
 **downstream** (input = the h5ad from qc_clustering):
 ```bash
 python3 scripts/build_job.py --entry downstream \
+    --species mouse \
     --input /data/$USER/PROJECT/scdownstream/qc_clustering/out/integrated_scvi_finalized.h5ad \
     --resdir /data/$USER/PROJECT/scdownstream/downstream \
     --dest   /data/$USER/PROJECT/scdownstream/downstream
@@ -129,4 +134,14 @@ Pass `--species mouse|human` to set the `species` field (applies to both entry p
 pipeline default is `human`, so `--species human` leaves `species` at its default (omitted from
 params.yml); `--species mouse` writes `species: mouse`. `--set species=...` also works.
 
-If `--species` is omitted, it is inferred from a species/organism column in the samplesheet (or a `--metadata file.tsv`); scientific names such as *Mus musculus* / *Homo sapiens* are recognised. A file mixing species is not auto-selected — pass `--species` explicitly.
+**A species is required.** The templates deliberately do **not** seed `species`, so if none can be
+resolved the build hard-errors instead of silently running human data as mouse.
+
+If `--species` is omitted, it is inferred from a species/organism column in a tabular file. That works
+for `qc_clustering`, whose `--input` is a samplesheet — but **not** for `downstream`, whose `--input` is
+an `.h5ad` that cannot be scanned: for that entry pass `--species` or `--metadata file.tsv`. Scientific
+names such as *Mus musculus* / *Homo sapiens* are recognised; a file mixing species is not
+auto-selected.
+
+The species map lives in the shared `<repo-root>/assets/genomes.json`, so this skill depends on that
+file even though it only reads the literal species name from it.

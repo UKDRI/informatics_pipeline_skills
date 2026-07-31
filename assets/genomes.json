@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Shared cluster reference data, read by every skill's scripts/build_job.py via --species.",
+    "Not pipeline-version pinned, so it lives once at the repo root instead of being duplicated",
+    "per skill (DESIGN.md 2). To add a species or bump an Ensembl release, edit this file only —",
+    "no Python change is needed anywhere.",
+    "",
+    "genomes.<species> keys are referenced by each skill's CONFIG['species_map'] values:",
+    "  species                -> the literal species name (scdownstream's 'species' param)",
+    "  fasta, gtf             -> genome FASTA / gene annotation (rnaseq, scrnaseq, differentialabundance)",
+    "  gene_sets_ensg         -> gProfiler GMT keyed on Ensembl gene IDs (differentialabundance, RNA-seq)",
+    "  gene_sets_name         -> gProfiler GMT keyed on gene symbols (differentialabundance, mass_spec)",
+    "  background_gene_names  -> protein-coding gene-symbol list, gprofiler2 background (mass_spec)",
+    "  protein_fasta          -> UniProt protein sequence FASTA for DIA search (quantmsdiann)",
+    "",
+    "A species missing a key that a run needs is a hard error naming the key, never a silent",
+    "fallback — so a partial entry cannot send an analysis at the wrong reference."
+  ],
+  "genomes": {
+    "human": {
+      "species": "human",
+      "fasta": "/nfsdata/genome/ucsc/hg38/hg38.fa.gz",
+      "gtf": "/nfsdata/genome/ensembl/release-115/GRCh38/chrHomo_sapiens.GRCh38.115.chr.gtf.gz",
+      "gene_sets_ensg": "/nfsdata/genome/gprofiler/hsapiens/gprofiler_full_hsapiens.ENSG.gmt",
+      "gene_sets_name": "/nfsdata/genome/gprofiler/hsapiens/gprofiler_full_hsapiens.name.gmt",
+      "background_gene_names": "/nfsdata/genome/ensembl/release-115/GRCh38/list_prot_geneNames_Homo_sapiens.GRCh38.115.txt",
+      "protein_fasta": "/nfsdata/genome/uniprot/human/UP000005640_9606_plus_HaoUniversal.fasta"
+    },
+    "mouse": {
+      "species": "mouse",
+      "fasta": "/nfsdata/genome/ucsc/mm39/mm39.fa.gz",
+      "gtf": "/nfsdata/genome/ensembl/release-115/GRCm39/chrMus_musculus.GRCm39.115.chr.gtf.gz",
+      "gene_sets_ensg": "/nfsdata/genome/gprofiler/mmusculus/gprofiler_full_mmusculus.ENSG.gmt",
+      "gene_sets_name": "/nfsdata/genome/gprofiler/mmusculus/gprofiler_full_mmusculus.name.gmt",
+      "background_gene_names": "/nfsdata/genome/ensembl/release-115/GRCm39/list_prot_geneNames_Mus_musculus.GRCm39.115.chr.txt",
+      "protein_fasta": "/nfsdata/genome/uniprot/mouse/UP000000589_10090_plus_HaoUniversal.fasta"
+    }
+  },
+  "species_aliases": {
+    "homo sapiens": "human",
+    "human": "human",
+    "mus musculus": "mouse",
+    "mouse": "mouse"
+  }
+}

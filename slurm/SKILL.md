@@ -98,8 +98,10 @@ python3 scripts/slurm_ops.py transfer --user <username> --host <hostname> \
 - Add `--progress` for large data (adds `-P`, so an interrupted push resumes).
 - An existing remote file is never replaced silently: the plan lists collisions and refuses. Only add
   `--overwrite` if the user explicitly wants them replaced.
-- **Genome references are not pushed** — `fasta`/`gtf`/`spaceranger_reference` live on the cluster
-  already (`/nfsdata/genome/…`).
+- **Reference files are not pushed** — anything filled from `--species` out of the skills'
+  `assets/genomes.json` (`fasta`, `gtf`, `gene_sets_files`, `gprofiler2_background_file`, the
+  quantmsdiann `database`) already lives on the cluster under `/nfsdata/genome/…`, as does an
+  explicitly-set `spaceranger_reference`.
 - For **public data, suggest the cheaper route**: download it directly on the cluster with the `ena`,
   `geo`, `arrayexpress`, `pride`, `sra`, or `fastq-download-script` skills instead of uploading. It is
   a suggestion — if the user wants their local copy pushed, push it.
