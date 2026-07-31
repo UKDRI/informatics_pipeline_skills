@@ -1,0 +1,21 @@
+# params_mass_spec.yml — nf-core:differentialabundance, proteomics overlay.
+# Loaded on top of params.yml when --study-type mass_spec is given; --set still wins.
+#
+# Differential testing is limma, so the results-table column names differ from DESeq2's.
+# Feature IDs are the DIA-NN / quantms 'Genes' column — which is also what the .name.gmt
+# gene sets and the list_prot_geneNames_* background (both filled from --species) are keyed
+# on. The abundance matrix must therefore carry a 'Genes' column.
+#
+# limma_normalisation is NOT set here: the pipeline default is already
+# median,quantile,cyclic_loess,vsn, so setting it would be a no-op.
+study_type: mass_spec
+differential_fc_column: "logFC"
+differential_pval_column: "P.Value"
+differential_qval_column: "adj.P.Val"
+features_id_col: "Genes"
+features_metadata_cols: "Genes"
+differential_feature_id_column: "Genes"
+differential_feature_name_column: "Genes"
+exploratory_assay_names: "raw,median_normalised,quantile_normalised,cyclic_loess,vsn"
+exploratory_log2_assays: "raw"
+exploratory_final_assay: "vsn"

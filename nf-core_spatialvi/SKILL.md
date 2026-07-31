@@ -101,4 +101,5 @@ see DESIGN.md §4.6 and `assets/base.config` for the default selectors.)
 spatialvi is species-dependent via its Space Ranger reference (`spaceranger_reference`), for which
 there is no house default path — set it explicitly with `--set spaceranger_reference=/path/to/ref`.
 (The pipeline auto-downloads a human GRCh38 reference by default.) There is no `--species` flag for
-this skill because no default reference paths are stored.
+this skill: `<repo-root>/assets/genomes.json` carries no Space Ranger reference, so the skill declares
+no `species_map`.

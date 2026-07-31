@@ -56,12 +56,20 @@ Canonical **pipeline**-skill structure:
 │   └── base.config          # pinned copy of conf/base.config; default process-resource reference (§4.6)
 ├── templates/
 │   ├── run_<pipeline>.sh    # SLURM job bash template
-│   └── params.yml           # recommended/example params, pre-filled (§5)
+│   ├── params.yml           # recommended/example params, pre-filled (§5)
+│   └── params_<value>.yml   # OPTIONAL assay overlay, layered over params.yml (§5)
 └── scripts/
     └── *.py                 # Python API for this skill
 ```
 
-Repo root additionally holds `DESIGN.md` (this file), `CLAUDE.md`, and `LICENSE`.
+Repo root additionally holds `DESIGN.md` (this file), `CLAUDE.md`, `README.md`, `LICENSE`, and one
+**shared** assets folder:
+
+```
+assets/
+└── genomes.json             # cluster reference paths + species aliases, read by every skill
+                             # that declares a species_map (§5)
+```
 
 Rules:
 
@@ -82,13 +90,22 @@ Rules:
 - **`templates/`** holds files that are *copied and edited* per run — never mutated in place.
   A single-entry pipeline has one `run_<pipeline>.sh` + `params.yml`; a pipeline with multiple
   `-entry` workflows has one `run_<folder>_<entry>.sh` **and** one `params_<entry>.yml` per entry
-  point (see §4.7 and §8).
+  point (see §4.7 and §8). A pipeline with assay variants may add `params_<value>.yml` overlay
+  files, which do **not** get their own job script (see §5, "Assay-specific recommended values").
 - **`scripts/`** holds the Python API for that skill (see §7). Even if a script is generic, each
   skill keeps its own copy so skills stay self-contained.
+- **Shared reference data — the one file outside a skill folder: `<repo-root>/assets/genomes.json`.**
+  Cluster reference data — genome FASTA/GTF paths, gene-set GMTs, background lists, protein FASTAs,
+  and the species-name aliases — is **not** pipeline-version pinned: it describes the cluster's
+  reference tree, not any pipeline release. Duplicating it per skill would mean editing six identical
+  files to add a species or bump an Ensembl release, so it lives **once at the repo root**, read by
+  the `build_job.py` of every skill that declares a `species_map` (see §5, "Species-based genome
+  selection"). This is deliberately narrow: everything a skill needs that *is* version-pinned to its
+  pipeline stays in the skill's own `assets/`.
 - The seeded example `nf-core_rnaseq/templates/run_nfcore_rnaseq.sh` is the reference template
   that all conventions in §4 are derived from.
 
-### The `slurm` folder — the one exception
+### The `slurm` folder — the one non-pipeline skill
 
 The structure above describes **pipeline** skills. The `slurm` operations skill (§9) is what actually
 **starts the pipeline runs** — it submits the job scripts the pipeline skills generated — but it is not
@@ -203,6 +220,10 @@ samplesheet=/nfsdata/${USER}/PATH_TO_SAMPLE_SHEET
 # CHANGE RESULTS_DIR to your folder on /data
 resdir=/data/${USER}/RESULTS_DIR
 outdir=$resdir/out
+
+# OPTIONAL custom process-resource config (see §4.6):
+# point this at a config file and uncomment the '-c $conf' line in the run command below.
+conf=CONFIG
 ```
 
 Use the mkdir-guard idiom for both `$resdir` and `$outdir`:
@@ -343,6 +364,10 @@ So `run_nfcore_scdownstream_qc_clustering.sh` is run first; its output h5ad beco
 echo "Finalizing..."
 cp *.sh $resdir/
 cp *.out $resdir/
+if [ -e $conf ]
+then
+	cp $conf $resdir/
+fi
 rm -rf work        # clean the Nextflow workdir
 echo "ALL DONE."
 ```
@@ -395,16 +420,19 @@ the bulk input/object files removable and everything else not).
 | Required input (`--input`, or entry-specific e.g. `--base_adata`) | CLI flag in `run_*.sh`   |
 | Output dir (`--outdir`)                         | CLI flag in `run_*.sh`   |
 | Nextflow run/report (`-profile`, `-with-report`, `-resume`, `-params-file`) | CLI flag in `run_*.sh` |
+| Entry point (`-entry <name>`, §4.7) and optional `-c custom.config` (§4.6) | CLI flag in `run_*.sh`, when used |
+| Variant selector (`--study-type`, §5) | chosen on the `build_job.py` CLI; its **value is written into** `params.yml` |
 | **Any other param that differs from default**   | `params.yml`             |
 | A param left at its pipeline default            | omitted entirely         |
 
-**Worked example (rnaseq).** The seeded template passes `--fasta`, `--gtf`, and `--aligner` as
-CLI flags. Under this convention they move into `params.yml`:
+**Worked example (rnaseq).** The upstream seed template *passed* `--fasta`, `--gtf`, and `--aligner`
+as CLI flags. Under this convention they move into `params.yml` (the shipped template has already
+made that move):
 
 ```yaml
 # params.yml — nf-core:rnaseq
-fasta: /nfsdata/genome/ucsc/mm39/mm39.fa.gz
-gtf: /nfsdata/genome/ensembl/release-115/GRCm39/chrMus_musculus.GRCm39.115.chr.gtf.gz
+fasta: <genomes.json: mouse.fasta>   # filled from --species; never a literal here
+gtf:   <genomes.json: mouse.gtf>     # filled from --species; never a literal here
 aligner: star_rsem
 ```
 
@@ -427,50 +455,137 @@ Current recommendations:
 |---|---|---|---|
 | `nf-core:rnaseq` | `aligner` | `star_salmon` | `star_rsem` |
 | `nf-core:scrnaseq` | `aligner` | `simpleaf` | `cellranger` |
+| `nf-core:differentialabundance` | `gprofiler2_run` | `false` | `true` |
+| `nf-core:differentialabundance` | `gprofiler2_min_diff` | `1` | `5` |
 
-Other pipelines have no house recommendation yet — add rows here as they are established.
+Other pipelines have no house recommendation yet — add rows here as they are established. This table
+covers **cross-cutting** recommendations only; per-entry and per-assay recommendations live in the
+template files themselves (`params_<entry>.yml`, `params_<value>.yml`) — e.g. scdownstream seeds a
+`name`, `celltypist_model`, `clustering_resolutions` and `automatic_cell_filtering` per entry, and
+differentialabundance's `params_mass_spec.yml` seeds the whole limma column set.
+
+**What may and may not be seeded in a template.** Alongside the recommendations above, a
+`params.yml` template **may** seed a per-run *path* parameter as an editable placeholder — e.g.
+`matrix: /data/$USER/PROJECT/matrix.tsv` — exactly as the bash template uses `PATH_TO_SAMPLE_SHEET`
+and `RESULTS_DIR` (§4.3). The user or the skill replaces it via `--set`. Two things must **not** be
+seeded:
+
+- **Shared reference files** — genome FASTA/GTF, gene-set GMTs, background lists, protein search
+  databases. These are not user-specific, so they are filled from `--species` out of
+  `<repo-root>/assets/genomes.json` (see "Species-based genome selection" below), never written into a
+  template. Seeding one would pin every run to one species.
+- **The output directory.** `outdir` is not a `params.yml` entry at all: it is `resdir`/`--outdir` in
+  the job script (see the classification table above), where bash expands `${USER}` at submit time.
+
+Note the asymmetry that makes the second point matter: `${USER}` in the bash job script *is* expanded
+by the shell, whereas a `$USER` inside `params.yml` is not — Nextflow passes YAML values through
+verbatim. That is fine for a placeholder the user is expected to edit, and it is unrelated to §9.3,
+whose unexpanded-`$VAR` rejection applies to paths handed to the `slurm` skill as `--path` arguments,
+not to values inside `params.yml` (which `slurm` never parses).
+
+### Assay-specific recommended values
+
+Where a pipeline's recommended values depend on the assay rather than the pipeline, the skill ships
+one **overlay per assay** alongside the base template:
+
+- `templates/params.yml` — the base, always loaded: values common to every assay.
+- `templates/params_<value>.yml` — loaded on top when the variant param has that value; absent
+  files are simply skipped. `<value>` is the value of the variant param, e.g. `params_mass_spec.yml`.
+
+The skill's CONFIG declares only *which* param selects the overlay and *which reference keys* each
+value uses — never the parameter values themselves, which stay in the YAML overlay as validated
+template data (§7):
+
+```python
+"variants": {
+    "param": "study_type",                        # also names the flag: --study-type
+    "params_file_pattern": "params_{value}.yml",  # in templates/; loaded only if it exists
+    "species_map": {                              # merged over the base species_map
+        "mass_spec": {
+            "gene_sets_files": "gene_sets_name",
+            "gprofiler2_background_file": "background_gene_names",
+        },
+    },
+},
+```
+
+So adding an assay whose recommendations are purely parameter values is a **new YAML file with no
+code change**; an assay that also needs *different reference files* additionally needs one line in
+`variants.species_map`.
+
+The value is resolved as the dedicated flag → `--set <param>=…` → the `nextflow.config` default;
+supplying both spellings with different values is an error. **The output is still a single params
+file** (the entry's `params_file`) — only the *source* of the recommendations varies. This is distinct
+from §4.7's per-entry `params_<entry>.yml`, where each entry point also has its own job script and its
+own output params file. Both kinds live in `templates/`, so a variant value must not collide with an
+entry name in the same skill; a skill needing both should give `params_file_pattern` a distinct shape.
+
+Currently only `nf-core:differentialabundance` uses this, for `study_type: mass_spec` (limma column
+names, normalisation, exploratory assay chain, and the `Genes` feature-ID columns).
 
 ### Species-based genome selection
 
-Pipelines with species-dependent parameters (a genome `fasta`/`gtf`, or a `species` field) fill
-those from a built-in species map, so the user picks a species instead of remembering file paths.
-`build_job.py` exposes **`--species mouse|human`** for these skills; each skill's CONFIG
-`species_map` declares which schema params it fills:
+Pipelines with species-dependent parameters (a genome `fasta`/`gtf`, gene-set files, or a `species`
+field) fill those from a shared species map, so the user picks a species instead of remembering file
+paths. `build_job.py` exposes **`--species mouse|human`** for these skills; each skill's CONFIG
+`species_map` declares which schema params it fills, as `{schema param: genomes.json key}`:
 
 | Skill | filled from `--species` |
 |---|---|
 | `nf-core:rnaseq`, `nf-core:scrnaseq` | genome `fasta` + `gtf` |
-| `nf-core:differentialabundance` | `gtf` |
+| `nf-core:differentialabundance` | `gtf` + `gene_sets_files`, plus `gprofiler2_background_file` under `study_type: mass_spec` |
 | `nf-core:scdownstream` | the `species` field itself |
+| `bigbio:quantmsdiann` | the search `database` (UniProt `protein_fasta`) |
 
-Reference files (dynamic — override any with `--set`):
+Note the differentialabundance mapping is **study-type dependent**: the base map gives the
+Ensembl-ID GMT (`gene_sets_ensg`), and the `mass_spec` variant overlays the gene-symbol GMT
+(`gene_sets_name`) plus a background list — see "Assay-specific recommended values" above.
 
-| species | fasta | gtf |
-|---|---|---|
-| mouse | `/nfsdata/genome/ucsc/mm39/mm39.fa.gz` | `/nfsdata/genome/ensembl/release-115/GRCm39/chrMus_musculus.GRCm39.115.chr.gtf.gz` |
-| human | `/nfsdata/genome/ucsc/hg38/hg38.fa.gz` | `/nfsdata/genome/ensembl/release-115/GRCh38/chrHomo_sapiens.GRCh38.115.chr.gtf.gz` |
+**The reference paths themselves live in `<repo-root>/assets/genomes.json`** (§2), not in any
+script. That file is the authoritative list — do not restate the paths here or in a SKILL.md, so
+there is exactly one place to edit. Its shape:
+
+```json
+{
+  "genomes": {
+    "mouse": { "species": "mouse", "fasta": "…", "gtf": "…", "gene_sets_ensg": "…", "…": "…" }
+  },
+  "species_aliases": { "mus musculus": "mouse", "mouse": "mouse" }
+}
+```
+
+Adding a species, adding a new kind of reference file, or bumping an Ensembl release is an edit to
+that JSON alone. A species entry missing a key that a run needs is a hard error naming the key,
+never a silent fallback.
+
+**A species-mapped param must never be left unset.** If no species can be resolved and any mapped
+param is still absent after `--set`, `build_job.py` hard-errors. Silently omitting a genome or a
+gene-set file produces a run that either fails obscurely or — worse, for enrichment — completes
+against the wrong organism and looks plausible.
 
 **Inferring species.** When `--species` is omitted, the skill infers it from a species/organism
 column in a metadata/samplesheet file — `--metadata file.tsv` if given, otherwise the `--input`
 samplesheet (when tabular; a non-tabular input such as an `.h5ad` is ignored). Scientific names are
 recognised (*Mus musculus* → mouse, *Homo sapiens* → human, plus the common names) via the
-`SPECIES_ALIASES` map. A file mixing species auto-selects nothing (it warns); the user then passes
-`--species` explicitly.
+`species_aliases` map in `<repo-root>/assets/genomes.json`. A file mixing species auto-selects nothing
+(it warns); the user then passes `--species` explicitly.
 
 **Precedence.** Species is resolved as explicit `--species` → `--metadata` → `--input`; the resolved
 species then fills the mapped params, and an explicit `--set` always wins over the filled value. A
 user can supply custom paths (`--set fasta=/path --set gtf=/path`) instead of, or alongside, species
-selection. The `GENOMES` and `SPECIES_ALIASES` maps are constants in each skill's `build_job.py`
-(self-contained, §7).
+selection. The full order is: base `templates/params.yml` → assay overlay → the variant param →
+species-mapped files → `--set`. The genome and species-alias maps are loaded from the shared
+`<repo-root>/assets/genomes.json` (§2), and only when the skill declares a `species_map` — so
+skills without one need no `genomes.json` at all.
 
-`nf-core:spatialvi` is species-dependent too but uses a Space Ranger reference directory
-(`spaceranger_reference`) with no house default paths yet — set it explicitly with
-`--set spaceranger_reference=...` (see its SKILL.md). `bigbio:quantmsdiann` has no species/genome
-parameter.
+`nf-core:spatialvi` is species-dependent too, but its reference is a Space Ranger directory
+(`spaceranger_reference`) for which `genomes.json` carries no key, so it declares no `species_map` and
+has no `--species` flag — set the reference explicitly with `--set spaceranger_reference=...` (see its
+SKILL.md).
 
 ### Obtaining & refreshing the `assets/` configs
 
-Both `assets/` files are downloaded verbatim from the pipeline repo at the raw URL for the **same
+The three `assets/` files are downloaded verbatim from the pipeline repo at the raw URL for the **same
 pinned version/branch**, e.g.:
 
 ```bash
@@ -491,7 +606,7 @@ reference, and `base.config` (the repo's `conf/base.config`) is the process-reso
 |---|---|---|---|
 | nf-core:rnaseq | `nf-core/rnaseq` @ `master` | 3.26.0 | — (release) |
 | nf-core:scrnaseq | `nf-core/scrnaseq` @ `master` | 4.2.0 | — (release) |
-| nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `163d07f` |
+| nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `4c3883c` |
 | bigbio:quantmsdiann | `bigbio/quantmsdiann` @ `main` | 2.2.0 | — (release) |
 | nf-core:spatialvi | `nf-core/spatialvi` @ `dev` | 1.0dev | `d0fd35d` |
 | nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `3009f37` |
@@ -512,6 +627,11 @@ version bumps — e.g. scdownstream's CellTypist model list (source: <https://ww
 curl -L https://celltypist.cog.sanger.ac.uk/models/models.json \
      -o nf-core_scdownstream/assets/celltypist_models.json
 ```
+
+**`<repo-root>/assets/genomes.json` is exempt from all of the above.** It is hand-maintained cluster
+reference data (§2), not a copy of anything in a pipeline repo, and it is **not** version-pinned: it
+changes when the cluster's reference tree changes (a new species, a new Ensembl release, a relocated
+FASTA), never because a pipeline was bumped. Do not re-download or re-pin it during a version bump.
 
 ---
 
@@ -545,11 +665,23 @@ curl -L https://celltypist.cog.sanger.ac.uk/models/models.json \
   - **Seed the pipeline's recommended non-default values** (§5) by default, report them to the user,
     and let user-supplied values override them. Recommendations live in the shipped
     `templates/params.yml`, so they are validated the same way as any other entry.
-  - **Fill species-dependent params from the species** using the built-in `GENOMES` map, when the
-    skill's CONFIG declares a `species_map` (§5, "Species-based genome selection"). The species comes
-    from `--species`, else is inferred from a species/organism column in `--metadata` or the
-    `--input` samplesheet (scientific names via `SPECIES_ALIASES`, e.g. *Mus musculus* → mouse).
-    Applied after the recommendations and before `--set`, so explicit `--set` wins.
+  - **Layer the assay overlay** when the skill's CONFIG declares `variants` (§5, "Assay-specific
+    recommended values"): resolve the variant param per §5's precedence, load
+    `templates/params_<value>.yml` over the base template if that file exists, and write the resolved
+    value into the params. CONFIG names the param, the filename pattern, and any per-variant reference
+    keys — never the parameter values, which stay validated template data.
+  - **Fill species-dependent params from the species** using the shared
+    `<repo-root>/assets/genomes.json` map (§2), when the skill's CONFIG declares a `species_map`
+    (§5, "Species-based genome selection"). Load it only in that case, and `die()` with a clear
+    message if it is missing or malformed rather than raising. The species comes from `--species`,
+    else is inferred from a species/organism column in `--metadata` or the `--input` samplesheet
+    (scientific names via the file's `species_aliases`, e.g. *Mus musculus* → mouse). Applied after
+    §5's precedence order, so an explicit `--set` always wins. A variant may overlay the species map
+    (e.g. a different gene-set file per assay).
+  - **Never leave a species-mapped param unset** — hard-error per §5.
+  - **No hard-coded cluster paths in the script.** Reference file paths are data
+    (`<repo-root>/assets/genomes.json`), so adding a species or bumping a release needs no code
+    change.
   - **Value constraints (where a pipeline defines one).** Validate a parameter's value against a
     stored reference list in `assets/` and **warn (not error)** on a miss. For scdownstream's
     `celltypist_model`:
@@ -565,8 +697,9 @@ curl -L https://celltypist.cog.sanger.ac.uk/models/models.json \
   - **Optionally** generate a custom process-resource config (Groovy, §4.6) from user-specified
     `cpus`/`memory`/`time` overrides — only when requested. Use `assets/base.config` as the
     reference for default resources and the valid `withName`/`withLabel` selectors, and warn when an
-    override targets a selector not present there. When generated, wire `-c custom.config` into the
-    job script; otherwise leave it out entirely.
+    override targets a selector not present there. The script **reports** the generated file; adding
+    `-c custom.config` to the job script is the skill's step (§3 step 5, §4.6), not the script's — it
+    fills only the input-path, `resdir` and optional `main` lines.
   - Where relevant, validate or derive the `samplesheet.csv`.
 - **Style:**
   - `argparse`-based CLI, one clear entry point per script.
@@ -830,8 +963,10 @@ in the §6 input chain that the user already holds locally:
   copied rather than only its contents. In this mode the skill creates nothing remotely and asks for no
   confirmation — there is nothing to confirm, since the user runs it. Say plainly that the destination
   directory must already exist, or that `rsync` will need it created first.
-- **Genome references are not per-run inputs.** The `fasta`/`gtf`/`spaceranger_reference` paths in §5
-  point at shared cluster locations (`/nfsdata/genome/…`) — use those rather than uploading a reference,
+- **Reference files are not per-run inputs.** Everything filled from `--species` out of
+  `<repo-root>/assets/genomes.json` (§5) — genome `fasta`/`gtf`, gene-set GMTs, gprofiler2 background
+  lists, the quantmsdiann search `database` — already lives on the cluster under `/nfsdata/genome/…`,
+  as does an explicitly-set `spaceranger_reference`. Use those paths rather than uploading a reference,
   and never write into a shared reference tree (§9.3 rejects it anyway).
 - Push destination is the run directory the job script will use — the `$resdir` / samplesheet paths of
   §4.3 — and it must pass §9.3. The templates default those to `/data/${USER}/…` and

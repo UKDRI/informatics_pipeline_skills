@@ -22,7 +22,7 @@ outdir=$resdir/out
 
 # OPTIONAL custom process-resource config (see DESIGN.md §4.6):
 # point this at a config file and uncomment the '-c $conf' line in the run command below.
-conf=/data/${USER}/PROJECT_NAME/scdownstream/nf-core-scdownstream.conf
+conf=CONFIG
 
 # export environment variables
 # singularity

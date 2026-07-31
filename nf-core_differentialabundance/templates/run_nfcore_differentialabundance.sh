@@ -11,7 +11,7 @@ set -o pipefail
 
 # parameters
 exec=/nfsdata/bin/nextflow-25.04.7-dist
-# DEV build: UKDRI dev_ukdri, commit 163d07f; confirm path on cluster
+# DEV build: UKDRI dev_ukdri, commit 4c3883c; confirm path on cluster
 main=/nfsdata/scripts/nf-core/dev/differentialabundance/main.nf
 
 # CREATE AND CHANGE PATH TO SAMPLESHEET

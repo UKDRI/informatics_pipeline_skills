@@ -22,6 +22,67 @@ cluster. There are two kinds:
 
 Each pipeline folder contains its skill definition, job-script template, and pinned reference files.
 
+## Install
+
+Claude Code picks up skills from `~/.claude/skills`. Symlink them from your clone rather than copying,
+so a `git pull` updates them in place:
+
+```bash
+git clone https://github.com/UKDRI/informatics_pipeline_skills.git
+cd informatics_pipeline_skills
+
+mkdir -p ~/.claude/skills
+# one symlink per skill you want
+ln -s "$PWD"/nf-core_rnaseq                ~/.claude/skills/
+ln -s "$PWD"/nf-core_scrnaseq              ~/.claude/skills/
+ln -s "$PWD"/nf-core_scdownstream          ~/.claude/skills/
+ln -s "$PWD"/nf-core_differentialabundance ~/.claude/skills/
+ln -s "$PWD"/nf-core_spatialvi             ~/.claude/skills/
+ln -s "$PWD"/bigbio_quantmsdiann           ~/.claude/skills/
+ln -s "$PWD"/slurm                         ~/.claude/skills/
+```
+
+Or all of them at once:
+
+```bash
+mkdir -p ~/.claude/skills
+for d in nf-core_* bigbio_* slurm; do ln -s "$PWD/$d" ~/.claude/skills/; done
+```
+
+Restart Claude Code (or start a new session) and the skills appear. Verify with `/help` or by asking
+for one by name.
+
+**Keep the clone intact.** The symlinks point back into it, and the skills read a shared
+`assets/genomes.json` at the repo root (see below) — so moving or deleting the clone breaks them.
+Requirements are just Python 3 and `pyyaml`; everything else runs on the cluster.
+
+## Reference files
+
+Genome, gene-annotation, gene-set, and protein-database paths are **not** hard-coded in the skills.
+They all live in one file at the repo root:
+
+```
+assets/genomes.json
+```
+
+It maps `mouse` / `human` to the cluster paths for each kind of reference:
+
+| Key | Used for |
+|---|---|
+| `fasta`, `gtf` | genome sequence and gene annotation (rnaseq, scrnaseq, differentialabundance) |
+| `gene_sets_ensg`, `gene_sets_name` | gProfiler gene-set GMTs for enrichment (differentialabundance) |
+| `background_gene_names` | gprofiler2 background gene list (differentialabundance, proteomics) |
+| `protein_fasta` | UniProt protein database for DIA search (quantmsdiann) |
+
+To point the skills at a different release, add a species, or add a new kind of reference, **edit this
+one file** — no Python change is needed anywhere, and the change applies to every skill at once.
+
+**These files must already exist on the HPC before you use the skills.** The skills only write the
+paths into `params.yml`; they never upload a reference, and nothing checks that a path exists until the
+pipeline runs on the cluster. So if you change an entry here — or add a species — make sure the file is
+staged under `/nfsdata/genome/…` on the cluster first, otherwise the job fails at launch. Shared
+reference trees are read-only to the skills by design: the `slurm` skill refuses to write into them.
+
 ## Cluster operations — the `slurm` skill
 
 | Command | Does |
@@ -53,9 +114,14 @@ files included — you get an `rsync` command to run yourself.
   unknown parameters or invalid choices are rejected.
 - **Recommended defaults** — each skill ships the UKDRI-recommended settings (e.g. rnaseq
   `aligner: star_rsem`, scrnaseq `aligner: cellranger`), applied automatically and easy to override.
-- **Species-aware genome selection** — pick mouse or human and the matching genome/annotation files
-  are filled in for you; the species can also be inferred from a samplesheet or metadata file
-  (scientific names like *Mus musculus* are recognised). Custom paths are always allowed.
+- **Species-aware reference selection** — pick mouse or human and the matching genome, annotation,
+  gene-set, and protein-database files are filled in for you from a single shared
+  [`assets/genomes.json`](assets/genomes.json); the species can also be inferred from a samplesheet or
+  metadata file (scientific names like *Mus musculus* are recognised). Custom paths are always allowed,
+  and a run that cannot resolve a species fails loudly rather than quietly using the wrong organism.
+- **Assay-aware defaults** — where the right settings depend on the assay rather than the pipeline
+  (e.g. differentialabundance `--study-type mass_spec` for DIA proteomics), the skill layers the
+  matching set of recommended values and switches to the appropriate reference files.
 - **Custom resource tuning (optional)** — request more CPUs, memory, or wall-time for specific
   processes when a dataset needs it, without changing the pipeline.
 - **Multiple entry points** — pipelines with more than one workflow (e.g. scdownstream's

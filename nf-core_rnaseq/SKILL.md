@@ -19,14 +19,17 @@ what the **`slurm` skill** uses to transfer the run to the HPC and submit it wit
 - **`samplesheet.csv`** — prepared beforehand (see the `ena`/`geo`/`arrayexpress` skills). Columns:
   `sample,fastq_1,fastq_2,strandedness` (`strandedness` = `auto`|`forward`|`reverse`|`unstranded`).
 - **Genome reference** — supplied by **species**: pass `--species mouse` or `--species human` and
-  `build_job.py` fills the matching `fasta`+`gtf` (mm39 / hg38, Ensembl release-115 GTF). If
-  `--species` is omitted, it is **inferred** from a species/organism column in the samplesheet or a
+  `build_job.py` fills the matching `fasta`+`gtf` from the shared `<repo-root>/assets/genomes.json`.
+  If `--species` is omitted, it is **inferred** from a species/organism column in the samplesheet or a
   `--metadata file.tsv` (scientific names like *Mus musculus* are recognised). For any other genome,
   give explicit paths with `--set fasta=... --set gtf=...` (these override `--species`).
+  `templates/params.yml` seeds neither, so **the build hard-errors** if no species can be resolved and
+  neither path was set — rather than emitting a `params.yml` with no genome.
 
 ## 3. Gather parameters
-Ask the user for: the samplesheet path, a results directory on `/data`, the genome `fasta`/`gtf`,
-and any non-default parameters. The **recommended** aligner is `star_rsem` (pipeline default is
+Ask the user for: the samplesheet path, a results directory on `/data`, the **species**
+(`--species mouse|human` — or explicit `fasta`/`gtf` paths for any other genome), and any non-default
+parameters. The **recommended** aligner is `star_rsem` (pipeline default is
 `star_salmon`) — it is pre-set in `templates/params.yml`; confirm or override.
 
 ## 4. Generate `params.yml` (+ optional custom config)
@@ -40,7 +43,9 @@ python3 scripts/build_job.py \
     --species mouse \
     --dest /data/$USER/PROJECT/rnaseq
 ```
-(Use `--species human` for hg38, or replace the auto-filled genome with `--set fasta=... --set gtf=...`.)
+(Use `--species human` for the human genome, or replace the auto-filled pair with
+`--set fasta=... --set gtf=...`. To add a species or bump a reference release, edit
+`<repo-root>/assets/genomes.json` only — it is shared by every species-dependent skill.)
 - Override the recommended aligner with `--set aligner=star_salmon` (must be one of the schema
   enum: `star_salmon`, `star_rsem`, `hisat2`, `bowtie2_salmon`).
 - Unknown keys or out-of-enum values are rejected with a hard error.
