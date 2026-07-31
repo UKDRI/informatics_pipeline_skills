@@ -99,7 +99,7 @@ switches which species files are used:
 | `--study-type` | Overlay file | Effect |
 |---|---|---|
 | `rnaseq` (default) | *(none needed)* | DESeq2's defaults already fit |
-| `mass_spec` | `params_mass_spec.yml` | limma results columns (`logFC` / `P.Value` / `adj.P.Val`), the exploratory assay chain ending in `vsn`, and all four feature columns → `Genes`. Also switches the species-filled gene sets and background — see "Species selection" |
+| `mass_spec` | `params_mass_spec.yml` | limma results columns (`logFC` / `P.Value` / `adj.P.Val`), the exploratory assay chain ending in `vsn`, and all four feature columns → `Genes`. Also switches the species-filled gene sets and background, and drops `gtf` — see "Species selection" |
 | `affy_array`, `maxquant`, `geo_soft_file` | *(none yet)* | base recommendations only |
 
 `limma_normalisation` is **not** set: the pipeline default is already
@@ -108,7 +108,7 @@ switches which species files are used:
 For `mass_spec`, `features_id_col`, `features_metadata_cols`, `differential_feature_id_column` and
 `differential_feature_name_column` are all set to `Genes` — the DIA-NN / quantms column, which is
 also what the gene-symbol GMT and the gene-name background are keyed on. **The abundance matrix must
-therefore carry a `Genes` column.** If the user's proteomics matrix keys rows
+therefore carry a `Genes` column** — those names are used as-is, with no GTF and no ID conversion. If the user's proteomics matrix keys rows
 on something else (e.g. `Protein.Group`), override all four with `--set`.
 
 To add recommended *values* for another assay later, drop a `templates/params_<study_type>.yml` file
@@ -165,13 +165,18 @@ by its key names — the paths themselves live only in that file:
 
 | Parameter | `genomes.json` key | When |
 |---|---|---|
-| `gtf` | `gtf` | always |
+| `gtf` | `gtf` | every study type **except** `mass_spec` |
 | `gene_sets_files` | `gene_sets_ensg` | every study type except `mass_spec` |
 | `gene_sets_files` | `gene_sets_name` | `--study-type mass_spec` |
 | `gprofiler2_background_file` | `background_gene_names` | `--study-type mass_spec` only; otherwise left at its `auto` default |
 
-So an RNA-seq run has two species-filled parameters and a `mass_spec` run has three. Override any of
-them with `--set`, which always wins.
+So either way exactly two parameters are species-filled: `gtf` + `gene_sets_files` for RNA-seq, and
+`gene_sets_files` + `gprofiler2_background_file` for `mass_spec`. Override any of them with `--set`,
+which always wins.
+
+**No GTF for `mass_spec`.** Proteomics takes the gene name directly from the matrix's `Genes` column
+with no ID conversion, so no annotation is needed and `gtf` is deliberately left unset. Supplying one
+anyway with `--set gtf=...` still works if a run needs it.
 
 If `--species` is omitted, it is inferred from a species/organism column in the samplesheet (or a
 `--metadata file.tsv`); scientific names such as *Mus musculus* / *Homo sapiens* are recognised. A

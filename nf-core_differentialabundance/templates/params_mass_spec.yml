@@ -4,7 +4,8 @@
 # Differential testing is limma, so the results-table column names differ from DESeq2's.
 # Feature IDs are the DIA-NN / quantms 'Genes' column — which is also what the .name.gmt
 # gene sets and the list_prot_geneNames_* background (both filled from --species) are keyed
-# on. The abundance matrix must therefore carry a 'Genes' column.
+# on. The abundance matrix must therefore carry a 'Genes' column: the names are used as-is,
+# with no ID conversion, which is why --species fills no gtf for this study type.
 #
 # limma_normalisation is NOT set here: the pipeline default is already
 # median,quantile,cyclic_loess,vsn, so setting it would be a no-op.

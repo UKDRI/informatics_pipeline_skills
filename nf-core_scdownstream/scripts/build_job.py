@@ -412,7 +412,14 @@ def main() -> None:
 
     species_map = dict(CONFIG.get("species_map", {}))
     if variant_value:
-        species_map.update((variants.get("species_map") or {}).get(variant_value, {}))
+        # A variant may remap a param to a different reference key, or map it to None to say
+        # this assay does not need that reference at all (dropping the base mapping).
+        for param_key, genome_key in ((variants.get("species_map") or {})
+                                      .get(variant_value, {}).items()):
+            if genome_key is None:
+                species_map.pop(param_key, None)
+            else:
+                species_map[param_key] = genome_key
     species = getattr(args, "species", None)
     if not species and species_map:
         for src in filter(None, (getattr(args, "metadata", None), args.input)):

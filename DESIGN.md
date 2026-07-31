@@ -502,12 +502,18 @@ template data (§7):
     "params_file_pattern": "params_{value}.yml",  # in templates/; loaded only if it exists
     "species_map": {                              # merged over the base species_map
         "mass_spec": {
+            "gtf": None,                          # None DROPS the base mapping for this variant
             "gene_sets_files": "gene_sets_name",
             "gprofiler2_background_file": "background_gene_names",
         },
     },
 },
 ```
+
+A variant's `species_map` entry either **remaps** a param to a different reference key or, with
+`None`, **drops** it — for an assay that genuinely needs no such reference (proteomics reads gene
+names straight from the matrix, so it needs no GTF). Dropping is not the same as leaving it unset: a
+dropped param is removed from the map, so the "never left unset" rule below does not demand it.
 
 So adding an assay whose recommendations are purely parameter values is a **new YAML file with no
 code change**; an assay that also needs *different reference files* additionally needs one line in
@@ -533,13 +539,14 @@ paths. `build_job.py` exposes **`--species mouse|human`** for these skills; each
 | Skill | filled from `--species` |
 |---|---|
 | `nf-core:rnaseq`, `nf-core:scrnaseq` | genome `fasta` + `gtf` |
-| `nf-core:differentialabundance` | `gtf` + `gene_sets_files`, plus `gprofiler2_background_file` under `study_type: mass_spec` |
+| `nf-core:differentialabundance` | `gtf` + `gene_sets_files`; under `study_type: mass_spec` instead `gene_sets_files` + `gprofiler2_background_file` (no `gtf` — proteomics needs no annotation) |
 | `nf-core:scdownstream` | the `species` field itself |
 | `bigbio:quantmsdiann` | the search `database` (UniProt `protein_fasta`) |
 
-Note the differentialabundance mapping is **study-type dependent**: the base map gives the
-Ensembl-ID GMT (`gene_sets_ensg`), and the `mass_spec` variant overlays the gene-symbol GMT
-(`gene_sets_name`) plus a background list — see "Assay-specific recommended values" above.
+Note the differentialabundance mapping is **study-type dependent**: the base map gives a `gtf` and the
+Ensembl-ID GMT (`gene_sets_ensg`), while the `mass_spec` variant swaps in the gene-symbol GMT
+(`gene_sets_name`), adds a background list, and **drops** `gtf` entirely — see "Assay-specific
+recommended values" above.
 
 **The reference paths themselves live in `<repo-root>/assets/genomes.json`** (§2), not in any
 script. That file is the authoritative list — do not restate the paths here or in a SKILL.md, so

@@ -41,8 +41,11 @@ CONFIG = {
     "variants": {
         "param": "study_type",                        # also names the flag: --study-type
         "params_file_pattern": "params_{value}.yml",  # in templates/; loaded only if it exists
-        "species_map": {                              # merged over the base species_map
+        "species_map": {                              # merged over the base species_map; None drops
             "mass_spec": {
+                # Proteomics takes gene names straight from the matrix, with no ID conversion,
+                # so no GTF is needed: drop the base mapping rather than fill it.
+                "gtf": None,
                 "gene_sets_files": "gene_sets_name",
                 "gprofiler2_background_file": "background_gene_names",
             },
@@ -418,7 +421,14 @@ def main() -> None:
 
     species_map = dict(CONFIG.get("species_map", {}))
     if variant_value:
-        species_map.update((variants.get("species_map") or {}).get(variant_value, {}))
+        # A variant may remap a param to a different reference key, or map it to None to say
+        # this assay does not need that reference at all (dropping the base mapping).
+        for param_key, genome_key in ((variants.get("species_map") or {})
+                                      .get(variant_value, {}).items()):
+            if genome_key is None:
+                species_map.pop(param_key, None)
+            else:
+                species_map[param_key] = genome_key
     species = getattr(args, "species", None)
     if not species and species_map:
         for src in filter(None, (getattr(args, "metadata", None), args.input)):
