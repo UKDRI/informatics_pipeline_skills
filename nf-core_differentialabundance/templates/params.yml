@@ -9,7 +9,10 @@
 #
 # NOTE: --input (the observations samplesheet) and --outdir are CLI flags in the run script,
 # NOT here. EDIT the three paths/names below, or override each with --set.
-contrasts: /data/$USER/PROJECT/contrasts.csv    # CSV: variable,reference,target,blocking
+contrasts: /data/$USER/PROJECT/contrasts.csv    # CSV: id,variable,reference,target,blocking
+                                                # id -> output filename/publishDir prefix;
+                                                # blocking is ';'-separated. Build it with
+                                                # scripts/contrasts.py build (SKILL.md §2.1).
 matrix: /data/$USER/PROJECT/matrix.tsv          # TSV abundance matrix (features x samples)
 study_name: my_study                            # identifier for results (default: study)
 gprofiler2_run: true      # gprofiler2 gene-set enrichment; --set gprofiler2_run=false to skip

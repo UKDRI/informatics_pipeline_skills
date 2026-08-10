@@ -34,6 +34,10 @@ CONFIG = {
     },
     # param -> assets JSON file for advisory free-text value lists (warn, not error).
     "value_lists": {},
+    # Secondary input sheets to validate when the param's value is a readable local file:
+    # {param: (module in this scripts/ dir, callable(path) -> (errors, warnings))}.
+    # Hard-errors before params.yml is written. Omit the key in skills with no such sheet.
+    "sheet_checks": {"contrasts": ("contrasts", "check_file")},
     # schema param -> genomes.json key; filled from --species (mouse/human), overridable via --set.
     "species_map": {'gtf': 'gtf', 'gene_sets_files': 'gene_sets_ensg'},
     # Assay variants: one schema param selects an optional templates/ overlay of recommended
@@ -56,7 +60,10 @@ CONFIG = {
 # --------------------------------------------------------------------------- #
 # Paths (resolved relative to this script: <skill>/scripts/build_job.py)
 # --------------------------------------------------------------------------- #
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# realpath, not abspath: a skill is normally reached through a symlink in
+# ~/.claude/skills, and only realpath follows that back into the clone. With abspath
+# the shared <repo-root>/assets/genomes.json would be looked for in ~/.claude/skills.
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 SKILL_DIR = os.path.dirname(SCRIPT_DIR)
 ASSETS_DIR = os.path.join(SKILL_DIR, "assets")
 TEMPLATES_DIR = os.path.join(SKILL_DIR, "templates")
@@ -191,6 +198,42 @@ def check_value_list(key: str, value: str, list_file: str) -> None:
     if norm(value) not in [norm(n) for n in names]:
         warn(f"'{key}' = {value!r} not in {list_file}; "
              f"if this is a custom model, give a file path instead.")
+
+
+def check_sheets(params: dict, sheet_checks: dict) -> None:
+    """Validate secondary input sheets declared in CONFIG["sheet_checks"].
+
+    {param: (module in this scripts/ dir, callable(path) -> (errors, warnings))}, e.g.
+    differentialabundance's contrasts sheet. Structural problems are a HARD error —
+    unlike the advisory check_value_list above — because a bad sheet either breaks the
+    run or, worse, completes into output paths nobody can use (DESIGN.md §6, §7). Runs
+    before anything is written, so params.yml is never produced for a bad sheet. A path
+    that is not readable locally (normally a cluster path) is reported, never guessed at.
+    """
+    import importlib
+    # Import the helper from THIS scripts/ dir regardless of cwd, and leave no .pyc
+    # behind in the clone — §7: the script writes only into --dest.
+    sys.dont_write_bytecode = True
+    if SCRIPT_DIR not in sys.path:
+        sys.path.insert(0, SCRIPT_DIR)
+    for param, (module_name, func_name) in sorted((sheet_checks or {}).items()):
+        value = params.get(param)
+        if not isinstance(value, str) or not value:
+            continue
+        if not os.path.isfile(value):
+            print(f"  note: '{param}' = {value} is not a local file; validate the local "
+                  f"copy with: python3 scripts/{module_name}.py check --{param} <path>")
+            continue
+        try:
+            checker = getattr(importlib.import_module(module_name), func_name)
+        except (ImportError, AttributeError) as exc:
+            warn(f"cannot validate '{param}': {module_name}.{func_name} unavailable ({exc})")
+            continue
+        errors, warnings = checker(value)
+        for msg in warnings:
+            warn(msg)
+        if errors:
+            die(f"invalid '{param}' sheet {value}:\n       " + "\n       ".join(errors))
 
 
 def config_defaults() -> dict:
@@ -452,6 +495,7 @@ def main() -> None:
             f"pass --species {'|'.join(sorted(genomes))}, add a species/organism column to the "
             f"samplesheet, or set them explicitly with --set")
 
+    check_sheets(params, CONFIG.get("sheet_checks"))
     validate_params(params, schema, CONFIG["value_lists"])
     params = strip_defaults(params, schema)
 

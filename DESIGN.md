@@ -59,7 +59,8 @@ Canonical **pipeline**-skill structure:
 │   ├── params.yml           # recommended/example params, pre-filled (§5)
 │   └── params_<value>.yml   # OPTIONAL assay overlay, layered over params.yml (§5)
 └── scripts/
-    └── *.py                 # Python API for this skill
+    ├── build_job.py         # the house-style engine (§7); body identical across skills
+    └── *.py                 # OPTIONAL skill-specific helper module(s) (§7)
 ```
 
 Repo root additionally holds `DESIGN.md` (this file), `CLAUDE.md`, `README.md`, `LICENSE`, and one
@@ -93,7 +94,21 @@ Rules:
   point (see §4.7 and §8). A pipeline with assay variants may add `params_<value>.yml` overlay
   files, which do **not** get their own job script (see §5, "Assay-specific recommended values").
 - **`scripts/`** holds the Python API for that skill (see §7). Even if a script is generic, each
-  skill keeps its own copy so skills stay self-contained.
+  skill keeps its own copy so skills stay self-contained. `build_job.py` is the shared **engine**:
+  every copy's body is byte-identical and all per-skill behaviour is declared in its `CONFIG` block —
+  keep it that way, so a fix lands in six identical files rather than six diverging ones. A skill may
+  add its own **helper module** beside it for work no other skill does. `build_job.py` learns *which*
+  module and *which* function from a `CONFIG` declaration — never by hard-coding a module name in the
+  engine body — but it does rely on the helper's **CLI shape**, so that shape is a convention, not a
+  per-skill choice (§7, `sheet_checks`): a helper validating a sheet exposes
+  **`check --<param> <path>`**, and one that can also produce that sheet exposes **`build … --dest`**.
+  The first such helper is `nf-core_differentialabundance/scripts/contrasts.py` (`build` | `check` for
+  the contrasts sheet, wired in via `CONFIG["sheet_checks"]`, §7).
+- **Scripts resolve their own directory with `os.path.realpath(__file__)`, not `abspath`.** A skill
+  is normally installed as a symlink in `~/.claude/skills` (see README), and only `realpath` follows
+  that symlink back into the clone. With `abspath`, `SKILL_DIR`'s parent is `~/.claude/skills`, so the
+  shared `<repo-root>/assets/genomes.json` below is looked for in the wrong place and every
+  species-dependent build dies on a missing reference map.
 - **Shared reference data — the one file outside a skill folder: `<repo-root>/assets/genomes.json`.**
   Cluster reference data — genome FASTA/GTF paths, gene-set GMTs, background lists, protein FASTAs,
   and the species-name aliases — is **not** pipeline-version pinned: it describes the cluster's
@@ -656,6 +671,70 @@ FASTA), never because a pipeline was bumped. Do not re-download or re-pin it dur
   the `slurm` skill's `transfer` step — §9.4.0 lists what that covers. Compressed inputs are unpacked on
   the cluster by the job in §9.4.5.
 
+### Contrast ids — differentialabundance
+
+`contrasts.csv` (§9.4.0) has the columns `id,variable,reference,target,blocking`, plus the optional
+`exclude_samples_col` / `exclude_samples_values`. Only `variable`, `reference` and `target` are
+structurally required; **`id` is required by this convention but tolerated by the pipeline**, which
+invents one when the column is absent — so a missing `id` column *warns* (and points at the generator)
+rather than erroring, while a *present but bad* `id` is an error. Two of these columns need rules,
+because the pipeline gives them none.
+
+**`id` becomes a path.** In the UKDRI fork it is `ext.prefix` for `DESEQ2_DIFFERENTIAL`,
+`LIMMA_DIFFERENTIAL` and `FILTER_DIFFTABLE` — the R templates paste it into filenames
+(`<id>.deseq2.results.tsv`) — **and** a `publishDir` component for `GPROFILER2_GOST` and `PROTEUS`.
+Nothing upstream validates it: the fork ships no `schema_contrasts.json`, and an empty column makes
+`workflows/differentialabundance.nf` invent one with `it.values().join('_')`, raw observation values
+included.
+
+**And a broken path is not the worst case — a quietly incomplete report is.** The R report locates
+each contrast's results with `paste0(gsub(' |;', '_', d), differential_file_suffix)` while the modules
+write `meta.id` **verbatim**, so an id containing a space or a `;` sends the report looking for a
+filename that was never written: the run completes, and that contrast is simply missing from the
+report. (Upstream is inconsistent with itself here — the GSEA table names paste the id verbatim,
+`paste0(contrasts$id, ".", gmt_name, '.gsea_report_for_', …)`.) An explicit `id` column *is* honoured
+throughout: the report only derives its own when the column is absent
+(`if (! 'id' %in% colnames(contrasts))`). So:
+
+- **Convention:** `variable__target__vs__reference`, plus `__block__<b1>__<b2>…` when `blocking` is
+  set — separator `__`, target before reference (the direction of the reported fold change), and the
+  literal token `block` marking the blocking list. E.g.
+  `condition__treated__vs__control__block__sex__batch`.
+- **Charset — checked on every id:** `[A-Za-z0-9._-]` only, hand-written ones included. `-` and `.`
+  are safe deliberately: an id is only pasted into filenames and used as an R **list** name, never put
+  through `make.names()` and never made a data.frame column, so neither character can be silently
+  mangled downstream.
+- **Collapse — applied when an id is *generated*:** runs of anything outside the charset become a
+  single `_`, and runs of `_` collapse to one, so a generated token can never contain `__` and the
+  separator stays unambiguous. This is a property of generation, not a validation rule: a hand-written
+  id may contain `__` anywhere, and the checker accepts it — it validates the charset and uniqueness,
+  never the shape.
+- **Unique per file** — two contrasts sharing an id overwrite each other's outputs.
+- **Only the id is sanitized.** `variable`, `reference`, `target` and `blocking` keep the verbatim
+  samplesheet spellings, which the pipeline matches against the observations table.
+- **On validation, a bad id is a hard error naming the fix** — the offending row, the illegal
+  characters, and the normalized id to use. That is `check`, and the `build_job.py` pre-flight (§7):
+  they only ever read, so a sheet is never repaired behind the user's back. **Generation is the one
+  place an unsafe id is replaced rather than rejected** — fixing ids is what `build` is for — and it
+  reports every id it derived or replaced. Either way the user's source sheet is **never rewritten in
+  place** (§7: a script writes only into `--dest`); a corrected sheet is a new file the user asked for.
+
+**`blocking` is semicolon-separated**, not colon: both R templates do
+`strsplit(opt$blocking_variables, split = ';')`. A colon list is not rejected — it is read as one
+variable name, `make.names()` mangles it, and the model is silently wrong, so it is an error too. Note
+the pinned `assets/nextflow_schema.json` `help_text` still says "colon-separated"; it is a verbatim
+copy (§5) and is not edited, so the correct delimiter is stated in the skill's `SKILL.md` instead.
+
+The pipeline also strips `NA` from that column with `it.blocking.replace('NA', '')` — a **substring**
+strip, not a whole-value one, so a blocking variable whose *name* contains `NA` is corrupted there
+(`NAcc` → `cc`) while an id generated here keeps the name intact. Our splitter treats only a whole
+value of `NA` as "no blocking", and the checker **warns** when a name contains `NA`; renaming the
+observations column is the only real fix.
+
+Both the generation and the checks live in `nf-core_differentialabundance/scripts/contrasts.py`
+(`build` | `check`, §2), and `build_job.py` runs the same check via `CONFIG["sheet_checks"]` (§7)
+before it writes `params.yml`.
+
 ---
 
 ## 7. Python API conventions
@@ -708,6 +787,34 @@ FASTA), never because a pipeline was bumped. Do not re-download or re-pin it dur
     `-c custom.config` to the job script is the skill's step (§3 step 5, §4.6), not the script's — it
     fills only the input-path, `resdir` and optional `main` lines.
   - Where relevant, validate or derive the `samplesheet.csv`.
+  - **Validate a secondary input sheet declared in `CONFIG["sheet_checks"]`** —
+    `{param: (helper module in this scripts/ dir, callable(path) -> (errors, warnings))}`. The check
+    runs **before `params.yml` is written**, so a bad sheet never yields a job that is submitted and
+    fails later; structural problems are a **hard error** (unlike the warn-only `value_lists` check
+    above), because they break the run or, worse, complete into output paths nobody can use. When the
+    param's value is not a readable local file — normally a cluster path such as
+    `/data/$USER/PROJECT/contrasts.csv` — say so and name the command that checks the local copy;
+    never guess at a path or skip silently. Skills with no such sheet omit the key entirely.
+    Currently only `nf-core:differentialabundance` declares one, for its `contrasts` sheet
+    (`scripts/contrasts.py`, §6 "Contrast ids").
+
+    **The helper's CLI shape is part of the contract** (§2). `CONFIG` names the module and the
+    validator function, but the note the engine prints for a non-local path is a *runnable command*:
+
+    ```
+    note: 'contrasts' = /data/$USER/PROJECT/contrasts.csv is not a local file; validate the local
+    copy with: python3 scripts/contrasts.py check --contrasts <path>
+    ```
+
+    That command is composed generically — `scripts/<module>.py check --<param> <path>` — so **every
+    `sheet_checks` helper must expose exactly that spelling**: a `check` subcommand whose path option
+    is named after the param it validates. A helper that also derives the sheet exposes `build` with a
+    `--dest` (never rewriting the source, see below). Deviating from the spelling does not break the
+    validation, but it makes the engine print a command that does not exist — so extend the convention
+    here rather than inventing a per-skill CLI.
+  - **Deriving a sheet writes a new file into `--dest`; the user's source sheet is never mutated.**
+    Rewriting an input in place would leave a `params.yml` pointing at a file whose content the user
+    never authored, and a re-run would produce different input from the same command.
 - **Style:**
   - `argparse`-based CLI, one clear entry point per script.
   - **Deterministic output** — same inputs produce byte-identical files (no timestamps, no
@@ -918,7 +1025,7 @@ or expect (§3, §5, §6) **and** the input data itself.
 | `params.yml`, or `params_<entry>.yml` per entry point | every pipeline skill (§5) |
 | `custom.config` | when process resources were tuned (§4.6) |
 | `samplesheet.csv` — the `--input` sheet, any column layout (§6) | rnaseq, scrnaseq, spatialvi, scdownstream `qc_clustering`, differentialabundance (its *observations* sheet) |
-| `contrasts.csv` — the contrasts sheet (`variable,reference,target,blocking`) | differentialabundance, referenced from `params.yml` as `contrasts` |
+| `contrasts.csv` — the contrasts sheet (`id,variable,reference,target,blocking`; §6) | differentialabundance, referenced from `params.yml` as `contrasts` |
 | the **`matrix` TSV** — abundance matrix (features × samples) | differentialabundance, referenced from `params.yml` as `matrix` |
 | `*.sdrf.tsv` — the SDRF sample table (**not** a CSV samplesheet) | quantmsdiann, its `--input` |
 | `metadata.tsv` | optional; the skills read it *locally* to infer species (§5), so push it only if the user wants it stored beside the run |
