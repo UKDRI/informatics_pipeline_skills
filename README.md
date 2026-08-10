@@ -52,9 +52,28 @@ for d in nf-core_* bigbio_* slurm; do ln -s "$PWD/$d" ~/.claude/skills/; done
 Restart Claude Code (or start a new session) and the skills appear. Verify with `/help` or by asking
 for one by name.
 
-**Keep the clone intact.** The symlinks point back into it, and the skills read a shared
-`assets/genomes.json` at the repo root (see below) — so moving or deleting the clone breaks them.
-Requirements are just Python 3 and `pyyaml`; everything else runs on the cluster.
+**Keep the clone intact.** The symlinks point back into it, and every skill reads the shared
+`assets/genomes.json` at the repo root (see below) — so moving or deleting the clone breaks them. The
+scripts resolve their own real path through the symlink, so with the symlink install above nothing
+else needs linking: `assets/genomes.json` is found inside the clone.
+
+**If you copy the skill folders instead of symlinking them**, copy the shared assets folder too — it
+has to sit beside the skill folders, i.e. one level above each skill:
+
+```bash
+# only needed for a copy-based install; symlinks find it in the clone
+mkdir -p ~/.claude/skills/assets
+cp assets/genomes.json ~/.claude/skills/assets/
+```
+
+Without it, every species-dependent build stops with
+`ERROR: missing shared reference map: …/assets/genomes.json`.
+
+**Requirements** are just Python 3 and `pyyaml` — everything else runs on the cluster:
+
+```bash
+python3 -m pip install pyyaml
+```
 
 ## Reference files
 
@@ -119,6 +138,10 @@ files included — you get an `rsync` command to run yourself.
   [`assets/genomes.json`](assets/genomes.json); the species can also be inferred from a samplesheet or
   metadata file (scientific names like *Mus musculus* are recognised). Custom paths are always allowed,
   and a run that cannot resolve a species fails loudly rather than quietly using the wrong organism.
+- **Validated input sheets** — differentialabundance contrast ids are generated to one convention
+  (`condition__treated__vs__control__block__sex__batch`) and checked for characters that would break
+  output paths, because each id becomes a results filename and directory prefix. An unsafe or
+  duplicated id stops the build instead of surfacing as unusable results hours later.
 - **Assay-aware defaults** — where the right settings depend on the assay rather than the pipeline
   (e.g. differentialabundance `--study-type mass_spec` for DIA proteomics), the skill layers the
   matching set of recommended values and switches to the appropriate reference files.

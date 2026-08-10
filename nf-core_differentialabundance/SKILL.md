@@ -39,10 +39,20 @@ samplesheet):
 - **`samplesheet.csv`** — the **observations** (samples) sheet, passed via `--input` (CLI flag in
   the run script). One row per observation; must include the sample-identifier column
   (`observations_id_col`, default `sample`) and any variables referenced by the contrasts.
-- **`contrasts` CSV** — describes the comparisons to run. Columns: `variable,reference,target,blocking`
-  where `variable` is a column of the samplesheet, `reference`/`target` are values in that column,
-  and `blocking` is a colon-separated list of additional blocking variables (may be empty). Goes in
-  `params.yml`.
+- **`contrasts` CSV** — describes the comparisons to run. Columns
+  `id,variable,reference,target,blocking` (plus the optional `exclude_samples_col` /
+  `exclude_samples_values`), where `id` names the contrast's output files (see §2.1), `variable` is a
+  column of the samplesheet, `reference`/`target` are values in that column, and `blocking` is a
+  **semicolon**-separated list of additional blocking variables (may be empty). Goes in `params.yml`.
+  Only `variable`, `reference` and `target` are structurally required; `id` is **optional to the
+  pipeline** — which invents one from the raw values when it is missing — but this skill always writes
+  it, because the invented one lands in every output path. Generate the sheet with
+  `scripts/contrasts.py build` (§2.1) rather than by hand.
+  *Delimiter note:* the pinned `assets/nextflow_schema.json` `help_text` says "colon-separated" — it
+  is stale and the asset is a verbatim copy, so it is not edited. Both R templates split on `;`
+  (`strsplit(opt$blocking_variables, split = ';')` in `deseq_de.R` and `limma_de.R`). A colon list is
+  **not** rejected: it is read as one variable name, `make.names()` mangles it, and the model is
+  silently wrong.
 - **`matrix` TSV** — the abundance matrix (features × samples; e.g. counts from nf-core/rnaseq).
   There must be a column for every row of the samplesheet. Goes in `params.yml`. (Not required when
   supplying CEL files for affy preprocessing.) For `--study-type mass_spec` the feature-ID column must
@@ -50,10 +60,90 @@ samplesheet):
 
 If any of these is missing, ask the user for it before building.
 
+### 2.1 Contrast ids
+A contrast's `id` is not cosmetic — it is `ext.prefix` for `DESEQ2_DIFFERENTIAL`,
+`LIMMA_DIFFERENTIAL` and `FILTER_DIFFTABLE`, which the R templates paste straight into filenames
+(`<id>.deseq2.results.tsv`, `<id>.limma.results.tsv`, `<id>.deseq2.model.txt`), **and** a
+`publishDir` path component for `GPROFILER2_GOST` and `PROTEUS`. `GSEA_GSEA` uses
+`"${meta.id}.${gene_sets.baseName}."`. So an id carrying `/`, `;`, `:`, a space or a shell
+metacharacter yields broken paths, stray nested directories, or results the user cannot glob — and
+nothing upstream catches it: the fork ships no `schema_contrasts.json`, and when the column is empty
+`workflows/differentialabundance.nf` invents an id with `it.values().join('_')`, raw observation
+values and all.
+
+**The quiet failure matters more than the loud one.** The report Rmd looks each contrast's results up
+as `paste0(gsub(' |;', '_', d), differential_file_suffix)`, while the modules write `meta.id`
+**verbatim** — so an id containing a space or a `;` makes the report look for a filename that was never
+written. The run succeeds, nothing errors, and that contrast is just absent from the report. (The GSEA
+table names use the id verbatim, so upstream disagrees with itself here.) Writing the `id` column is
+safe: the report derives its own only when the column is missing
+(`if (! 'id' %in% colnames(contrasts))`).
+
+**House convention** — `variable__target__vs__reference`, with `__block__<b1>__<b2>…` appended when
+`blocking` is set:
+
+```csv
+id,variable,reference,target,blocking
+condition__treated__vs__control,condition,control,treated,
+condition__treated__vs__control__block__sex__batch,condition,control,treated,sex;batch
+Braak_stage__Braak_5-6__vs__braak0,Braak stage,braak0,Braak 5-6,
+```
+
+- separator `__` (double underscore); target before reference, because that is the direction of the
+  reported fold change; the literal token `block` marks the start of the blocking-variable list;
+- **every** id — generated or hand-written — may contain only `[A-Za-z0-9._-]`. `-` and `.` are
+  allowed on purpose: an id is only pasted into filenames and used as an R list name, never passed
+  through `make.names()`, so neither gets mangled downstream;
+- **when an id is generated**, runs of anything else collapse to a single `_` and runs of `_` collapse
+  to one (`AD/CTRL` → `AD_CTRL`, `Braak 5-6` → `Braak_5-6`), so a generated token never contains `__`
+  and the separator stays unambiguous. That is a property of generation only — `check` validates the
+  charset and uniqueness, not the shape, so a hand-written id containing `__` is accepted as it is;
+- ids must be **unique** — two contrasts sharing one id overwrite each other's output files;
+- only the `id` is sanitized. `variable`, `reference`, `target` and `blocking` keep the **verbatim**
+  samplesheet spellings, since the pipeline matches them against the observations table.
+
+**Generate them, don't type them:**
+
+```bash
+# from a draft sheet holding just variable,reference,target[,blocking] — never modified
+python3 scripts/contrasts.py build --in draft_contrasts.csv --dest /data/$USER/PROJECT
+# or straight from the contrasts you agreed with the user
+python3 scripts/contrasts.py build \
+    --contrast 'variable=condition,reference=control,target=treated' \
+    --contrast 'variable=condition,reference=control,target=treated,blocking=sex;batch' \
+    --dest /data/$USER/PROJECT
+# validate a sheet the user already has (exit 1 on error)
+python3 scripts/contrasts.py check --contrasts contrasts.csv
+```
+
+`build` writes `<dest>/contrasts.csv` (or `--out-name`) with the `id` column first; it keeps a
+pre-existing id that is already safe (`--rebuild-ids` regenerates every id to the convention) and
+reports every id it derived or replaced. **This is the one place an unsafe id is repaired rather than
+rejected** — that is what `build` is for; it warns on each replacement and never touches the `--in`
+file.
+
+`check` — the same validator — only ever reads, so it **hard-errors** instead: on an unsafe or
+duplicate id, an empty id, a missing required column, and a colon-separated `blocking`. It **warns**
+when there is no `id` column at all (the pipeline tolerates that and invents ids, so it is not an
+error), on an unrecognised column, and on a blocking variable R's `make.names()` would rewrite.
+
+`build_job.py` runs the same check on the `contrasts` path automatically and **refuses to write
+`params.yml`** if it fails. When that path is a cluster path (the usual case) there is nothing to
+read locally, so it says so — run `contrasts.py check` on the local copy before transferring.
+
+**One divergence to know about.** The pipeline strips `NA` from the `blocking` column with
+`it.blocking.replace('NA', '')`, which removes the *substring* — so a blocking variable actually named
+`NAcc` becomes `cc` in the model while the generated id keeps `NAcc`. `contrasts.py` treats only a
+whole value of `NA` as "no blocking" and warns when a name contains `NA`; renaming the observations
+column is the only real fix.
+
 ## 3. Gather parameters
 Ask the user for: the samplesheet path (`--input`), a results directory on `/data`, the `contrasts`
 CSV and `matrix` TSV paths, a `study_name`, the **species** (`--species mouse|human`), the
 **study type** (`--study-type`, see §4.1 below), and any other non-default parameters.
+
+If the contrasts still have to be written — or the user's sheet has no `id` column — build it first
+with `scripts/contrasts.py build` (§2.1), then pass that file to `build_job.py`.
 
 UKDRI house recommendations, applied automatically from `templates/params.yml` and overridable with
 `--set`:
@@ -83,6 +173,8 @@ python3 scripts/build_job.py \
   Nextflow does **not** expand `$USER` in a params file, so always override all three with `--set`
   (as above) or hand-edit them before submitting.
 - Unknown keys or out-of-enum values (e.g. `--set study_type=bogus`) are rejected with a hard error.
+- If the `contrasts` path is a readable local file it is validated first (§2.1); a bad contrast id
+  aborts the build and no `params.yml` is written.
 - To tune process resources, pass `--resource 'process_high:memory=128.GB'` (repeatable); this
   writes a `custom.config` and you then add `-c custom.config` to the run command (DESIGN.md §4.6).
 
@@ -148,7 +240,8 @@ run.
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_differentialabundance.sh` and `params.yml`, and
 that the **`slurm` skill** takes it from here: it transfers the job script, `params.yml`, the
-samplesheet, `contrasts.csv` and the `matrix` TSV to the HPC, submits
+samplesheet, the `contrasts.csv` that `contrasts.py build` wrote (§2.1) and the `matrix` TSV to the
+HPC, submits
 `run_nfcore_differentialabundance.sh` with `sbatch` (from the directory holding `params.yml`, which the
 script references by relative path), and reports the job id. Running `sbatch` on the cluster by hand is
 equally fine. Never submit the job yourself from this skill.
