@@ -126,8 +126,10 @@ and its `params_<entry>.yml` together (the script references that file by relati
 `run_nfcore_scdownstream_qc_clustering.sh` first, and only once its
 `integrated_scvi_finalized.h5ad` exists submit `run_nfcore_scdownstream_downstream.sh` with that file
 as `--base_adata`. Use the `slurm` skill's `job_status` on the first job id to know when it has
-completed. Running each `sbatch` by hand is equally fine. Never submit the jobs yourself from this
-skill.
+completed — or have the `slurm` skill queue the second stage straight away, behind the first, with
+`submit --after-ok <first job id>`: it then starts only if `qc_clustering` succeeded, and the
+`--base_adata` path is already known from that stage's `$outdir`. Running each `sbatch` by hand is
+equally fine. Never submit the jobs yourself from this skill.
 
 ## Species selection
 Pass `--species mouse|human` to set the `species` field (applies to both entry points). The

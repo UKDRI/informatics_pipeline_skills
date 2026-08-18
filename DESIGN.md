@@ -13,7 +13,8 @@
   - *optionally*, a **custom process-resource config** (`-c custom.config`, §4.6) when the run needs
     non-default CPUs/memory/time.
 - **One operations skill — `slurm`** (§9) — which transfers those artifacts **and the run's input data**
-  to the HPC, submits jobs (subject to a 100-job cap), reports job and pipeline status, cancels a job,
+  to the HPC, submits jobs (subject to a 100-job cap) — chaining one behind another where a stage must
+  only start if the stage before it succeeded (§9.4.7) — reports job and pipeline status, cancels a job,
   **downloads results back within a 2 GB cap**, and removes an allow-listed intermediate artifact on
   request. It also carries a small job template for unpacking compressed input archives on the cluster.
 
@@ -135,7 +136,7 @@ slurm/
 ├── templates/
 │   └── run_uncompress.sh    # SLURM job: unzip / tar -xzf an archive on the HPC (§9.4.5)
 └── scripts/
-    └── slurm_ops.py         # subcommands: transfer | submit | job_status | cancel | cleanup (§9.4)
+    └── slurm_ops.py         # transfer | download | submit | job_status | cancel | cleanup (§9.4)
 ```
 
 Like any template (§2), `run_uncompress.sh` is **copied and edited** per run, never mutated in place.
@@ -371,7 +372,10 @@ modes.
 | `downstream` | `--base_adata` (that `.h5ad`) | downstream analysis on the qc_clustering output |
 
 So `run_nfcore_scdownstream_qc_clustering.sh` is run first; its output h5ad becomes the
-`--base_adata` input of `run_nfcore_scdownstream_downstream.sh`.
+`--base_adata` input of `run_nfcore_scdownstream_downstream.sh`. Both can be submitted in one sitting,
+the second queued behind the first on an `afterok` dependency (§9.4.7) — the `--base_adata` path is
+known in advance from the first stage's `$outdir`, so nothing has to wait for a human to notice that
+stage one finished.
 
 ### 4.8 Finalize / cleanup
 
@@ -881,7 +885,8 @@ touches the cluster. It is the only skill permitted to run `ssh`, `scp`/`rsync`,
 
 - **`transfer`** — push the generated files **and the run's input data** to the HPC (§9.4.0),
 - **`download`** — pull results back, bounded to **2 GB** with big files excluded (§9.4.6),
-- **`submit`** — submit the job script with `sbatch`,
+- **`submit`** — submit the job script with `sbatch`, optionally **chained** behind another job with
+  `--dependency=afterok` so a stage starts only if the stage before it succeeded (§9.4.7),
 - **`job_status`** — report the SLURM state and where the pipeline currently is,
 - **`cancel`** — cancel one job by job id with `scancel`,
 - **`cleanup`** — remove one explicitly named path on request, restricted to the allow-listed
@@ -987,7 +992,7 @@ and the path guard (§9.3) live in one place instead of being duplicated. All si
 |---|---|---|
 | `transfer` | **Upload** (local → HPC): the run's text artifacts *and* its input data — see §9.4.0 for the list. `--print-only` prints the `rsync` command for the user to run instead of pushing | §9.3 guard on the remote directory; ask before creating it; ask before overwriting any existing remote file; uploads only — the other direction is `download` |
 | `download` | **Download** (HPC → local): a results directory, scanned first, big files excluded, **capped at 2 GB total** (§9.4.6) | §9.3 guard on the **source** — never another user's directory; refuse rather than truncate when over the cap; confirmed by the user before it starts |
-| `submit` | `sbatch <script>` in the remote run directory | **Pre-flight the 100-job limit with `squeue -u` and refuse if the user is at the cap** (§9.4.3); after submission, **report the folder on the HPC and the job id** to the user — both, explicitly |
+| `submit` | `sbatch <script>` in the remote run directory; `--after-ok <jobid>` queues it behind another job (§9.4.7) | **Pre-flight the 100-job limit with `squeue -u` and refuse if the user is at the cap** (§9.4.3); after submission, **report the folder on the HPC and the job id** to the user — both, explicitly; a chained submission also reports what it waits on, and refuses a predecessor that is not the user's own or has already failed |
 | `job_status` | `sacct` / `scontrol show job <jobid>` | Report the state as one of **pending, running, complete, fail, node_fail**, plus the current pipeline step (§9.5) |
 | `cancel` | `scancel <jobid>` | One job id, never a mass cancel; confirm first; afterwards **suggest** a `cleanup` of that run's directory (§9.4.4) |
 | `cleanup` | `rm -rf <one explicit absolute path>` | §9.3 guard **and** the §9.4.1 allow-list — the target's own name must be a removable kind; the path comes from the user via `--path`; show the target (`ls`, `du -sh`) and require explicit confirmation before removing |
@@ -1212,6 +1217,10 @@ squeue -u <username> -h -o "%i" | wc -l      # the user's current job count
   `cancel` (§9.4.4) what they no longer need, then ask again.
 - Count the jobs `squeue -u <username>` reports for that user — both running and pending, since a
   pending job occupies a slot in the queue just the same.
+- **A dependency-held job is a pending job.** A chained submission (§9.4.7) sits in the queue from the
+  moment it is submitted, not from the moment its predecessor finishes, so it counts against the cap
+  like anything else. The pre-flight therefore runs **once per link, not once per chain**: a three-stage
+  chain occupies three of the 100 slots before any of it has run.
 - Use `--user` from §9.2 for `-u`; never `squeue` for another user, and never fall back to a bare
   `squeue` over the whole cluster.
 - **If `squeue` fails, refuse to submit.** An unreadable queue is not an empty queue: treating a failed
@@ -1387,6 +1396,82 @@ transfer themselves.
    allow-list, path guard, and confirmation (§9.3, §9.4.1). **Never chain a cleanup onto a download**,
    and never run one just because a download succeeded.
 
+#### 9.4.7 Chaining jobs on a dependency — `afterok`
+
+Analyses are **sequences of jobs**, not single runs — the canonical one being
+
+```
+fastq download  →  nf-core:rnaseq  →  nf-core:differentialabundance
+```
+
+Each stage is its own job script and its own SLURM job (§4), and each must not start until the stage
+before it has **succeeded**. SLURM expresses that as a job dependency, so `submit` takes
+**`--after-ok <jobid>`**. This is also what replaces watching a job: §9.5 forbids polling, so a
+dependency is how the next stage starts unattended.
+
+```bash
+# stage 1 — the download job; sbatch reports job id 1234567
+python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
+    --script /data/<username>/project_1/fastqs/run_fastq_download.sh --confirm
+
+# stage 2 — queued immediately, but starts only if 1234567 exits 0
+python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
+    --script /data/<username>/project_1/nfcore/rnaseq/run_nfcore_rnaseq.sh \
+    --after-ok 1234567 --confirm
+
+# stage 3 — queued behind stage 2 the same way
+python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
+    --script /data/<username>/project_1/nfcore/differentialabundance/run_nfcore_differentialabundance.sh \
+    --after-ok 1234568 --confirm
+```
+
+which is `sbatch --dependency=afterok:1234567 run_nfcore_rnaseq.sh`, run from the script's own
+directory exactly as an unchained submission is (§4.5, §9.4). Several predecessors are given by
+repeating the flag — `--after-ok 111 --after-ok 222` → `--dependency=afterok:111:222` — for a stage
+that needs two earlier jobs to have finished.
+
+- **`afterok`, and only `afterok`.** Never `after` (which starts as soon as the predecessor merely
+  *begins*), `afterany` (which starts even when it failed), `afternotok`, or `singleton`. A stage must
+  never run on the absent or half-written output of a stage that died; that is the entire point of the
+  dependency, and it is the one keyword this skill supports.
+- **Build the chain forward, one confirmed submission at a time.** Submit stage 1, read the job id out
+  of the `sbatch` output, then submit stage 2 with **that** id. **Never predict, invent, or reuse a job
+  id** — a guessed id is either nothing at all or somebody else's job. Each link carries its own
+  `--confirm` (§9.6); there is deliberately no "submit the whole chain" command, because each
+  submission is a separate state change the user agrees to.
+- **The predecessor is checked before the dependent is queued.** It must be a plain job id, it must
+  exist, and it must belong to `--user` — the same check `cancel` makes (§9.4.4), which is why both go
+  through one shared job lookup rather than two copies of the rule. If it has already **failed**,
+  refuse: SLURM would hold the new job forever as `DependencyNeverSatisfied`, so queueing it achieves
+  nothing. If it is already **complete**, warn — the dependency is satisfied at once and the job starts
+  straight away. And as everywhere in §9.6, a lookup that could not run is not a lookup that passed.
+- **Every other pre-flight still runs, once per link.** The 100-job cap (§9.4.3) — a dependency-held job
+  counts as pending from the moment it is queued — the path guard (§9.3), and the check that the
+  script's relative `params.yml` / `custom.config` sit beside it (§4.5).
+- **Transfer the whole chain before submitting any of it.** A later stage's job script and `params.yml`
+  are submitted **now**, not when its turn comes, so they must already be on the cluster and complete
+  before stage 1 goes in (§9.4.0). Push everything, then submit in order.
+- **A later stage's input paths are written up front, and cannot be pre-flighted.** The rnaseq
+  samplesheet names FASTQs the download job has not fetched yet; the differentialabundance `matrix` is a
+  file rnaseq will only write into its `$outdir` (§4.3). Those paths are **predicted from the earlier
+  stage's output layout** and written into the samplesheet / `params.yml` before anything is submitted,
+  because **nothing can edit a job that is already queued**. Say this plainly to the user: a file that
+  does not exist yet was not checked, and a mispredicted path fails at the start of that stage, hours
+  later. Where a path cannot be predicted with confidence, do not chain that stage — submit it on its
+  own once the previous one has finished.
+- **A broken link does not resume.** When a middle stage fails, everything queued behind it is dead:
+  SLURM leaves each dependent pending as `DependencyNeverSatisfied` (§9.5) instead of running it.
+  `cancel` those (§9.4.4), fix the failed stage, and submit the remainder again — `-resume` (§4.5) still
+  applies *within* a stage, and keeping that stage's `work` is what makes it possible.
+- **Report the whole chain back to the user.** For every link: the folder on the HPC, the job id, and
+  what it waits on — the §9.4 "state the folder and the job id" rule, applied once per submission. The
+  user's next question will be about one of those ids, and `job_status` on a dependency-held job says
+  which predecessor it is still waiting for (§9.5).
+- **Only pipeline stages are ever chained.** A `download` (§9.4.2, §9.4.6) or a `cleanup` (§9.4.1) is
+  never queued behind a run and never triggered by a job finishing. Results come back, and scratch is
+  removed, only on the user's explicit and separately confirmed request — a chain of pipeline stages
+  changes nothing about that.
+
 ### 9.5 Progress reporting from the logs
 
 `job_status` reports more than the raw SLURM state — it tells the user *where the pipeline is*:
@@ -1403,6 +1488,13 @@ transfer themselves.
   submitted or is running — and report it alongside the state.
 - Always report the job state as one of **pending, running, complete, fail, node_fail** (distinguish
   `node_fail` from an ordinary `fail`: it means the node died, not the pipeline).
+- **Report `scontrol`'s `Reason` and `Dependency` as well**, because `pending` alone hides the two
+  outcomes of a chained job (§9.4.7). `Reason=Dependency` means it is queued behind a job that has not
+  finished yet — name that job. **`Reason=DependencyNeverSatisfied` means its predecessor failed and
+  SLURM will never run it at all**: say so plainly and point at `cancel` (§9.4.4) to free the queue
+  slot, rather than leaving the user watching a job that is permanently stuck. A dependency-held job has
+  also not started, so it has no Nextflow log and no current step — report that instead of inventing
+  one.
 - **Read-only.** Never truncate, edit, move, or delete a log. Tail the relevant portion rather than
   dumping a whole large file.
 

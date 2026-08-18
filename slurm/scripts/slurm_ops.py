@@ -21,6 +21,10 @@ Hard rules implemented here (DESIGN.md §9.2, §9.3):
     is refused, never silently truncated, when the scan comes out over the cap.
   * Every remote command is echoed before it runs.
 
+Runs can be chained (DESIGN.md §9.4.7): `submit --after-ok <jobid>` queues a job behind
+another with sbatch --dependency=afterok, so a stage starts only if the stage before it
+succeeded — fastq download -> rnaseq -> differentialabundance, one job each.
+
 Stdlib only.
 """
 from __future__ import annotations
@@ -671,7 +675,75 @@ def cmd_download(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# submit (DESIGN.md §9.4, §9.4.3)
+# Looking one job up — shared by submit, job_status and cancel (§9.4.4, §9.4.7)
+# --------------------------------------------------------------------------- #
+def sacct_field(user: str, host: str, jobid: str, field: str) -> str:
+    out = remote_text(
+        user, host,
+        ["sacct", "-j", jobid, "-X", "-n", "-P", f"--format={field}"],
+    )
+    for line in out.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def scontrol_fields(user: str, host: str, jobid: str) -> dict:
+    """Parse `scontrol show job` key=value pairs (live / recently-finished jobs only)."""
+    out = remote_text(user, host, ["scontrol", "show", "job", jobid])
+    fields = {}
+    for token in out.split():
+        if "=" in token:
+            k, _, v = token.partition("=")
+            fields.setdefault(k, v)
+    return fields
+
+
+def normalise_state(raw: str) -> str:
+    base = raw.split()[0].split("+")[0].upper() if raw else ""
+    return STATE_MAP.get(base, base.lower() or "unknown")
+
+
+def require_jobid(jobid: str, what: str) -> str:
+    """One plain job id — never a range, a list, or a wildcard (§9.4.4, §9.4.7)."""
+    if not jobid.isdigit():
+        die(f"job id must be a plain number, got {jobid!r} — {what} must be one plain job "
+            "id: never a range, a mass operation, or a wildcard.")
+    return jobid
+
+
+def job_facts(user: str, host: str, jobid: str, what: str) -> dict:
+    """Owner, name, state and work dir of one job. Halts if it is not the user's own.
+
+    `scontrol` knows only live and recently-finished jobs, so every field falls back to
+    `sacct`. Used by `cancel` (§9.4.4) and by `submit --after-ok` (§9.4.7), so the
+    one-plain-job-id rule and the ownership check live here rather than in each caller.
+    """
+    require_jobid(jobid, what)
+
+    fields = scontrol_fields(user, host, jobid)
+    owner = fields.get("UserId", "").split("(")[0] or sacct_field(user, host, jobid, "User")
+    if not owner:
+        die(f"no job {jobid} found on the cluster (neither scontrol nor sacct knows it) — "
+            f"cannot use it as {what}.")
+    # scontrol prints UserId=<name>(<uid>), but falls back to the bare uid when the name
+    # cannot be resolved — so accept either form rather than comparing only names.
+    if owner != user and owner != remote_uid(user, host):
+        die(f"job {jobid} belongs to {owner!r}, not {user!r}. Refusing to use it as {what}.")
+
+    raw_state = fields.get("JobState", "") or sacct_field(user, host, jobid, "State")
+    return {
+        "jobid": jobid,
+        "owner": owner,
+        "jobname": fields.get("JobName", "") or sacct_field(user, host, jobid, "JobName"),
+        "workdir": fields.get("WorkDir", "") or sacct_field(user, host, jobid, "WorkDir"),
+        "raw_state": raw_state,
+        "state": normalise_state(raw_state),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# submit (DESIGN.md §9.4, §9.4.3, §9.4.7)
 # --------------------------------------------------------------------------- #
 def queued_job_count(user: str, host: str) -> int:
     """The user's current queue length. Halts if squeue cannot be read.
@@ -703,6 +775,9 @@ def cmd_submit(args: argparse.Namespace) -> None:
     script = guard_path(args.script, args.user)
     rundir = posixpath.dirname(script)
     name = posixpath.basename(script)
+    # Checked locally first so a typo costs nothing; job_facts() below is the real check.
+    for dep in args.after_ok:
+        require_jobid(dep, "an afterok dependency")
 
     if remote_kind(args.user, args.host, script) != "file":
         die(f"job script not found on the cluster: {script}")
@@ -722,6 +797,23 @@ def cmd_submit(args: argparse.Namespace) -> None:
             "submits many child jobs of its own as it runs."
         )
 
+    # Chaining (§9.4.7): every predecessor must exist, be this user's own job, and still
+    # be able to succeed. `afterok` only — a stage must never start on the half-written
+    # output of a stage that failed.
+    deps = []
+    for dep in args.after_ok:
+        facts = job_facts(args.user, args.host, dep, "an afterok dependency")
+        if facts["state"] in ("fail", "node_fail"):
+            die(f"job {dep} has already finished as {facts['state']} "
+                f"[SLURM: {facts['raw_state']}], so a job queued after it with afterok would "
+                "never run — SLURM would hold it forever as DependencyNeverSatisfied. "
+                "Nothing was submitted: fix and re-run that stage first.")
+        if facts["state"] == "complete":
+            warn(f"job {dep} is already complete, so the dependency is satisfied immediately "
+                 "and this job starts as soon as the scheduler has room.")
+        deps.append(facts)
+    dep_spec = ("afterok:" + ":".join(d["jobid"] for d in deps)) if deps else ""
+
     # The script's -params-file / -c are relative paths, so they must sit beside it (§4.5).
     # remote_probe, not remote_text: an unreadable script used to yield "" here, which
     # parsed to "no relative inputs" and skipped the check entirely.
@@ -737,20 +829,24 @@ def cmd_submit(args: argparse.Namespace) -> None:
             "otherwise fail minutes later inside Nextflow."
         )
 
+    # sbatch runs FROM the run directory: the script's -params-file is relative (§4.5).
+    sbatch_argv = ["sbatch"] + ([f"--dependency={dep_spec}"] if dep_spec else []) + [name]
+    remote_cmd = (f"cd {shlex.quote(rundir)} && "
+                  + " ".join(shlex.quote(a) for a in sbatch_argv))
+
     info("")
     info("Submit plan:")
     info(f"  host      : {target(args.user, args.host)}")
     info(f"  directory : {rundir}")
     info(f"  script    : {name}")
-    info(f"  command   : cd {rundir} && sbatch {name}")
+    for d in deps:
+        info(f"  waits for : {d['jobid']} ({d['jobname'] or 'unknown name'}, {d['state']}) "
+             "— this job runs only if that one succeeds")
+    info(f"  command   : {remote_cmd}")
     if not args.confirm:
         die_needs_confirm("The job above would be submitted.")
 
-    # sbatch runs FROM the run directory: the script's -params-file is relative (§4.5).
-    res = run_remote(
-        args.user, args.host,
-        ["sh", "-c", f"cd {shlex.quote(rundir)} && sbatch {shlex.quote(name)}"],
-    )
+    res = run_remote(args.user, args.host, ["sh", "-c", remote_cmd])
     out = (res.stdout or "").strip()
     info(out)
 
@@ -761,41 +857,23 @@ def cmd_submit(args: argparse.Namespace) -> None:
     info("")
     info(f"Submitted on the HPC in : {rundir}")
     info(f"Job id                  : {jobid}")
+    if deps:
+        info("Waits for               : " + ", ".join(
+            f"{d['jobid']} ({d['jobname'] or 'unknown name'})" for d in deps))
+        if any(d["state"] != "complete" for d in deps):
+            info("It stays pending with reason Dependency until then, and never runs at all if "
+                 "that job fails — job_status reports both cases explicitly.")
     info("")
     info(f"Check it with:  slurm_ops.py job_status --user {args.user} --host {args.host} "
          f"--jobid {jobid}")
+    if not deps:
+        info("To queue the next stage behind this one, submit it with "
+             f"--after-ok {jobid} (it then starts only if this job succeeds).")
 
 
 # --------------------------------------------------------------------------- #
 # job_status (DESIGN.md §9.5)
 # --------------------------------------------------------------------------- #
-def sacct_field(user: str, host: str, jobid: str, field: str) -> str:
-    out = remote_text(
-        user, host,
-        ["sacct", "-j", jobid, "-X", "-n", "-P", f"--format={field}"],
-    )
-    for line in out.splitlines():
-        if line.strip():
-            return line.strip()
-    return ""
-
-
-def scontrol_fields(user: str, host: str, jobid: str) -> dict:
-    """Parse `scontrol show job` key=value pairs (live / recently-finished jobs only)."""
-    out = remote_text(user, host, ["scontrol", "show", "job", jobid])
-    fields = {}
-    for token in out.split():
-        if "=" in token:
-            k, _, v = token.partition("=")
-            fields.setdefault(k, v)
-    return fields
-
-
-def normalise_state(raw: str) -> str:
-    base = raw.split()[0].split("+")[0].upper() if raw else ""
-    return STATE_MAP.get(base, base.lower() or "unknown")
-
-
 def current_step(log_text: str) -> str:
     """The process Nextflow most recently submitted."""
     steps = re.findall(r"Submitted process > (.+)", log_text)
@@ -817,6 +895,13 @@ def cmd_job_status(args: argparse.Namespace) -> None:
     jobname = fields.get("JobName") or sacct_field(args.user, args.host, jobid, "JobName")
     elapsed = fields.get("RunTime") or sacct_field(args.user, args.host, jobid, "Elapsed")
 
+    # A chained job (§9.4.7) is pending for a reason worth naming: "Dependency" means it is
+    # still waiting, "DependencyNeverSatisfied" means it will never run at all.
+    reason = fields.get("Reason", "")
+    dependency = fields.get("Dependency", "")
+    if dependency in ("(null)", "null", "None"):
+        dependency = ""
+
     # Paths reported BY the cluster get the same guard as paths the user types: a job
     # that ran outside the user's own directories is reported, not read (§9.3).
     raw_workdir = fields.get("WorkDir") or sacct_field(args.user, args.host, jobid, "WorkDir")
@@ -834,6 +919,21 @@ def cmd_job_status(args: argparse.Namespace) -> None:
         info(f"  work dir : {workdir}")
     if stdout_path:
         info(f"  slurm out: {stdout_path}")
+    if dependency:
+        info(f"  waits for: {dependency}")
+    if reason and reason not in ("None", "none"):
+        info(f"  reason   : {reason}")
+
+    if reason == "DependencyNeverSatisfied":
+        info("")
+        info("This job is queued behind another one that did not succeed, so SLURM will NEVER "
+             "run it — it holds the queue slot indefinitely. Clear it with:")
+        info(f"  slurm_ops.py cancel --user {args.user} --host {args.host} --jobid {jobid}")
+        info("Then fix the stage it depended on and submit this one again.")
+    elif state == "pending" and reason == "Dependency":
+        info("")
+        info(f"This job has not started: it is queued behind {dependency or 'another job'} and "
+             "runs only once that job has finished successfully, so it has no Nextflow log yet.")
 
     # Read-only: tail the logs, never modify them.
     if stdout_path:
@@ -888,25 +988,12 @@ def cmd_job_status(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------- #
 def cmd_cancel(args: argparse.Namespace) -> None:
     jobid = args.jobid
-    if not jobid.isdigit():
-        die(f"job id must be a plain number, got {jobid!r}. This command cancels one job only — "
-            "never a range, a mass cancel, or a wildcard.")
-
-    fields = scontrol_fields(args.user, args.host, jobid)
-    owner = fields.get("UserId", "").split("(")[0] or sacct_field(
-        args.user, args.host, jobid, "User"
-    )
-    if not owner:
-        die(f"no job {jobid} found on the cluster — nothing to cancel.")
-    # scontrol prints UserId=<name>(<uid>), but falls back to the bare uid when the name
-    # cannot be resolved — so accept either form rather than comparing only names.
-    if owner != args.user and owner != remote_uid(args.user, args.host):
-        die(f"job {jobid} belongs to {owner!r}, not {args.user!r}. Refusing to cancel it.")
-
-    jobname = fields.get("JobName", "") or sacct_field(args.user, args.host, jobid, "JobName")
-    workdir = fields.get("WorkDir", "") or sacct_field(args.user, args.host, jobid, "WorkDir")
-    state = normalise_state(fields.get("JobState", "") or
-                            sacct_field(args.user, args.host, jobid, "State"))
+    # The plain-job-id rule and the "is it yours" check live in job_facts(), shared with
+    # submit --after-ok (§9.4.7), so there is one ownership check rather than two.
+    facts = job_facts(args.user, args.host, jobid, "the job to cancel")
+    jobname = facts["jobname"]
+    workdir = facts["workdir"]
+    state = facts["state"]
 
     info("")
     info("Cancel plan:")
@@ -1050,6 +1137,10 @@ def main() -> None:
     add_common(p)
     p.add_argument("--script", required=True,
                    help="absolute path of the job script on the HPC")
+    p.add_argument("--after-ok", dest="after_ok", action="append", default=[],
+                   metavar="JOBID",
+                   help="queue this job behind JOBID (sbatch --dependency=afterok): it starts "
+                        "only if that job succeeds. Repeat for several predecessors")
     p.set_defaults(func=cmd_submit)
 
     p = subs.add_parser("job_status", help="report SLURM state and the current pipeline step")

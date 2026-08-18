@@ -7,7 +7,9 @@ description: >-
   skill (nf-core_rnaseq, nf-core_scrnaseq, nf-core_scdownstream, nf-core_differentialabundance,
   nf-core_spatialvi, bigbio_quantmsdiann) has generated a run_*.sh + params.yml — triggers:
   "submit", "sbatch", "run the pipeline on the cluster", "job status", "squeue", "sacct",
-  "scontrol", "scancel", "cancel job", "transfer to HPC", "rsync to cluster", "copy to the
+  "scontrol", "scancel", "cancel job", "chain jobs", "job dependency", "afterok", "dependency",
+  "run pipelines in sequence", "after the download finishes", "transfer to HPC", "rsync to cluster",
+  "copy to the
   cluster", "download results", "pull results", "fetch results", "get results back", "copy results
   from the cluster", "unzip on the cluster", "untar", "clean up work directory", "delete work dir",
   "HPC", "SLURM". Never uses passwords; always asks for the username and hostname; only ever reads
@@ -26,7 +28,7 @@ Everything runs through one script, `scripts/slurm_ops.py`, with six subcommands
 |---|---|
 | `transfer` | upload job scripts, params, samplesheets **and input data** to the HPC |
 | `download` | pull a results directory back — scanned first, big files excluded, **max 2 GB** |
-| `submit` | `sbatch` the job script from its own directory; reports the HPC folder and job id |
+| `submit` | `sbatch` from the script's own directory; reports the HPC folder and job id; chains with `--after-ok` (§5a) |
 | `job_status` | `sacct`/`scontrol` state + the pipeline step read from the logs |
 | `cancel` | `scancel` one job id, then suggest cleaning up its work directory |
 | `cleanup` | remove one allow-listed path (`work`, `out`, archives, dataset objects, …) |
@@ -177,6 +179,49 @@ python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
 - **Always report back the HPC folder and the job id**, verbatim, and tell the user the `job_status`
   command for that id. There is no active monitoring — the user asks when they want to know.
 
+## 5a. Chaining runs — one stage after another
+Analyses usually run as a sequence: **fastq download → nf-core:rnaseq → nf-core:differentialabundance**.
+Each stage is its own job script and its own job, and each must only start if the one before it
+**succeeded**. Do that with `--after-ok`, which becomes `sbatch --dependency=afterok:<jobid>`:
+
+```bash
+# 1. the download job — sbatch reports, say, job id 1234567
+python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
+    --script /data/<username>/project_1/fastqs/run_fastq_download.sh --confirm
+
+# 2. rnaseq, queued now but starting only if 1234567 succeeds (reports, say, 1234568)
+python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
+    --script /data/<username>/project_1/nfcore/rnaseq/run_nfcore_rnaseq.sh \
+    --after-ok 1234567 --confirm
+
+# 3. differentialabundance, queued behind rnaseq
+python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
+    --script /data/<username>/project_1/nfcore/differentialabundance/run_nfcore_differentialabundance.sh \
+    --after-ok 1234568 --confirm
+```
+
+- **`transfer` everything first.** A later stage's `run_*.sh` and `params.yml` are submitted **now**, not
+  when its turn comes, so they must already be on the cluster before stage 1 goes in.
+- **One confirmed submission per link**, in order, using the job id `sbatch` actually returned. Never
+  guess, predict, or reuse a job id — read it from the previous submission's output.
+- **`afterok` only.** Not `after`, `afterany`, or `afternotok`: a stage must never run on the missing or
+  half-written output of a stage that failed. A predecessor that has already **failed** is refused —
+  SLURM would hold the new job forever; one that is already **complete** only gets a warning, and the
+  new job then starts as soon as the scheduler has room.
+- **Each link counts against the 100-job cap** — a queued dependent job is pending from the moment it is
+  submitted, so a three-stage chain takes three slots before any of it has run.
+- **The downstream input paths have to be written up front and cannot be checked.** The rnaseq
+  samplesheet names FASTQs the download has not fetched yet; the differentialabundance `matrix` is a file
+  rnaseq has not written yet. Predict them from the earlier stage's output directory, write them into the
+  samplesheet / `params.yml` **before** submitting, and tell the user plainly that those files were not
+  verified — nothing can edit a job once it is queued. If a path cannot be predicted confidently, do not
+  chain that stage; submit it when the previous one has finished.
+- **If a stage fails, everything behind it is stuck**, pending forever as `DependencyNeverSatisfied`.
+  `cancel` those, fix that stage, and re-submit the rest. Keep its `work` if you intend to `-resume`.
+- **Report every link back**: folder, job id, and what each one waits on.
+- **Never chain a `download` or a `cleanup` onto a run.** Only pipeline stages are chained; fetching
+  results and freeing space stay separate, explicitly confirmed requests.
+
 ## 6. job_status — state and pipeline step
 ```bash
 python3 scripts/slurm_ops.py job_status --user <username> --host <hostname> --jobid 1234567
@@ -185,6 +230,10 @@ python3 scripts/slurm_ops.py job_status --user <username> --host <hostname> --jo
   shown too; `node_fail` means the node died, not the pipeline).
 - Reads the SLURM `.out` (via `scontrol`'s `StdOut`) and the `.nextflow.log` in the job's work
   directory, and reports **which pipeline process is currently running**.
+- Reports `Reason` and `Dependency` for a chained job (§5a): `Reason=Dependency` means it is queued and
+  still waiting for its predecessor, while **`Reason=DependencyNeverSatisfied` means that predecessor
+  failed and SLURM will never run this job** — say so instead of reporting a bare `pending`, and offer
+  `cancel` to free the queue slot. A job that has not started has no Nextflow log, so there is no step.
 - Read-only: never edit, truncate, or delete a log; it tails rather than dumping whole files.
 - **No polling.** Run it once when asked. Do not loop, sleep, re-check on a timer, or promise to
   watch the job.
@@ -257,8 +306,9 @@ destdir=/data/<username>/project_1/raw
 
 ## 10. Hand back
 After any operation, tell the user plainly: the exact HPC folder, the job id, the state, and the next
-command they can run — `job_status` for that id, `download` or the full `rsync` to fetch results (§4b),
-`cleanup` to free space once the data is local. If something was refused — the job cap, the 2 GB
+command they can run — `job_status` for that id, `download` or the full `rsync` to fetch results
+(§4b), `cleanup` to free space once the data is local. For a chain (§5a), report **every** job id and
+what each one waits on, not just the last submission. If something was refused — the job cap, the 2 GB
 download cap, a path outside their own directories, a non-allow-listed cleanup target, an SSH auth
 failure — say which rule refused it and what they can do instead. Never present a suggestion you made
 (a cleanup, a bigger download) as something already done.
