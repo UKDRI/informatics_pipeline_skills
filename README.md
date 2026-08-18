@@ -108,7 +108,7 @@ reference trees are read-only to the skills by design: the `slurm` skill refuses
 |---|---|
 | `transfer` | upload job scripts, params, samplesheets and input data to the HPC |
 | `download` | pull a results directory back — scanned first, big files excluded, max 2 GB |
-| `submit` | `sbatch` the job script from its own directory; reports the HPC folder and job id |
+| `submit` | `sbatch` from the script's own directory; reports the HPC folder and job id; chains one stage behind another with `--after-ok` |
 | `job_status` | SLURM state (pending/running/complete/fail/node_fail) plus the current pipeline step |
 | `cancel` | `scancel` one job, then suggest cleaning up its work directory |
 | `cleanup` | remove intermediate data (`work`, `out`, archives, dataset objects, …) |
