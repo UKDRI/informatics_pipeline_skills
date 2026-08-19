@@ -63,6 +63,16 @@ Tell the user the paths of the generated `run_nfcore_rnaseq.sh` and `params.yml`
 references by relative path), and reports the job id. Running `sbatch run_nfcore_rnaseq.sh` on the
 cluster by hand is equally fine. Never submit the job yourself from this skill.
 
+**What feeds nf-core:differentialabundance.** The run's `out/<aligner>/` directory holds the two files a
+downstream differential-abundance run consumes — `rsem.merged.gene_counts.tsv` +
+`rsem.merged.gene_lengths.tsv` under `star_rsem/` (the recommended aligner), or
+`salmon.merged.gene_counts.tsv` + `salmon.merged.gene_lengths.tsv` under `star_salmon/`. They become the
+`nf-core_differentialabundance` skill's `matrix` and `transcript_length_matrix`, passed on **as written —
+the counts are never rounded to integers**, because the gene lengths let DESeq2 model length bias.
+DESIGN.md §6 is the authoritative table; mention the paths when handing back if the user plans that step,
+including when the two jobs are chained on an `afterok` dependency (the path has to be written before the
+file exists).
+
 ## Custom-config recommendations
 (None specific to rnaseq yet. Scale `withLabel: 'process_high'` memory/cpus for very large genomes
 or deep libraries as needed — see DESIGN.md §4.6.)

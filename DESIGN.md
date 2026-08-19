@@ -476,18 +476,22 @@ Current recommendations:
 | `nf-core:scrnaseq` | `aligner` | `simpleaf` | `cellranger` |
 | `nf-core:differentialabundance` | `gprofiler2_run` | `false` | `true` |
 | `nf-core:differentialabundance` | `gprofiler2_min_diff` | `1` | `5` |
+| `nf-core:differentialabundance` | `transcript_length_matrix` | *unset* | the rnaseq gene lengths TSV (RNA-seq only — §6) |
 
 Other pipelines have no house recommendation yet — add rows here as they are established. This table
 covers **cross-cutting** recommendations only; per-entry and per-assay recommendations live in the
 template files themselves (`params_<entry>.yml`, `params_<value>.yml`) — e.g. scdownstream seeds a
 `name`, `celltypist_model`, `clustering_resolutions` and `automatic_cell_filtering` per entry, and
-differentialabundance's `params_mass_spec.yml` seeds the whole limma column set.
+differentialabundance ships two overlays — `params_mass_spec.yml` seeds the whole limma column set,
+`params_rnaseq.yml` the nf-core:rnaseq counts + gene-lengths pair (§6).
 
 **What may and may not be seeded in a template.** Alongside the recommendations above, a
 `params.yml` template **may** seed a per-run *path* parameter as an editable placeholder — e.g.
 `matrix: /data/$USER/PROJECT/matrix.tsv` — exactly as the bash template uses `PATH_TO_SAMPLE_SHEET`
-and `RESULTS_DIR` (§4.3). The user or the skill replaces it via `--set`. Two things must **not** be
-seeded:
+and `RESULTS_DIR` (§4.3). The user or the skill replaces it via `--set`. A placeholder may itself be
+**assay-specific**: differentialabundance's base template keeps the generic `matrix.tsv`, while its
+`params_rnaseq.yml` overlay seeds the aligner-specific counts/lengths pair the rnaseq handoff actually
+writes (§6). Two things must **not** be seeded:
 
 - **Shared reference files** — genome FASTA/GTF, gene-set GMTs, background lists, protein search
   databases. These are not user-specific, so they are filled from `--species` out of
@@ -545,8 +549,15 @@ from §4.7's per-entry `params_<entry>.yml`, where each entry point also has its
 own output params file. Both kinds live in `templates/`, so a variant value must not collide with an
 entry name in the same skill; a skill needing both should give `params_file_pattern` a distinct shape.
 
-Currently only `nf-core:differentialabundance` uses this, for `study_type: mass_spec` (limma column
-names, normalisation, exploratory assay chain, and the `Genes` feature-ID columns).
+Currently only `nf-core:differentialabundance` uses this, with two overlays: `study_type: mass_spec`
+(limma column names, normalisation, exploratory assay chain, and the `Genes` feature-ID columns) and
+`study_type: rnaseq` (the nf-core:rnaseq counts + gene-lengths placeholders, §6).
+
+The rnaseq one also shows **why** an overlay is the right home for a param only one assay has:
+`transcript_length_matrix` is RNA-seq-only, and the merge is `params.update(overlay)` — an overlay can
+override a base key but cannot delete one. Seeding it in the base `params.yml` would leak a length-matrix
+placeholder into every proteomics and array run. **A param that does not apply to every assay belongs in
+that assay's overlay, never in the base template.**
 
 ### Species-based genome selection
 
@@ -674,6 +685,33 @@ FASTA), never because a pipeline was bumped. Do not re-download or re-pin it dur
 - Getting the samplesheet, the other per-run text artifacts, **and the input data** onto the cluster is
   the `slurm` skill's `transfer` step — §9.4.0 lists what that covers. Compressed inputs are unpacked on
   the cluster by the job in §9.4.5.
+
+### Abundance matrix — the nf-core:rnaseq handoff
+
+differentialabundance's `matrix` normally comes from an nf-core:rnaseq run, and the recommended handoff is
+**two files from the same aligner directory** of that run's `$outdir` (= `$resdir/out`, §4.3): the merged
+gene counts matrix as `matrix`, and the merged gene lengths file as `transcript_length_matrix`.
+
+This section is the **authoritative** version of the table below; unlike a reference *path* (which lives
+only in `genomes.json`, §5), these filenames **are** repeated in the two `SKILL.md` files that need them —
+DESIGN.md is read at authoring time, while a `SKILL.md` has to stand on its own at run time (the
+differentialabundance `params_rnaseq.yml` template names them too). Keep every copy in step, and change this
+one first.
+
+| rnaseq `aligner` | `matrix` | `transcript_length_matrix` |
+|---|---|---|
+| `star_rsem` (the UKDRI recommendation, §5) | `star_rsem/rsem.merged.gene_counts.tsv` | `star_rsem/rsem.merged.gene_lengths.tsv` |
+| `star_salmon` (the nf-core:rnaseq default) | `star_salmon/salmon.merged.gene_counts.tsv` | `star_salmon/salmon.merged.gene_lengths.tsv` |
+
+- **Both files, always** — the counts alone are a valid run, but the gene lengths are what let DESeq2 model
+  length bias across samples, so the skill seeds both (`templates/params_rnaseq.yml`, §5).
+- **The counts are passed through as written — never rounded to integers, never pre-processed.** Supplying
+  the gene lengths is exactly what removes any need for integer coercion. A skill must not add a rounding or
+  "clean the matrix" step, and must not tell the user to.
+- **The directory follows the aligner the rnaseq run actually used**, not the pipeline default — with
+  `aligner: star_rsem` recommended (§5), `star_rsem/rsem.*` is the usual pair. Confirm which one ran before
+  writing the paths.
+- Other study types keep the generic `matrix` placeholder: `transcript_length_matrix` is RNA-seq-only.
 
 ### Contrast ids — differentialabundance
 
@@ -1032,6 +1070,7 @@ or expect (§3, §5, §6) **and** the input data itself.
 | `samplesheet.csv` — the `--input` sheet, any column layout (§6) | rnaseq, scrnaseq, spatialvi, scdownstream `qc_clustering`, differentialabundance (its *observations* sheet) |
 | `contrasts.csv` — the contrasts sheet (`id,variable,reference,target,blocking`; §6) | differentialabundance, referenced from `params.yml` as `contrasts` |
 | the **`matrix` TSV** — abundance matrix (features × samples) | differentialabundance, referenced from `params.yml` as `matrix` |
+| the **gene lengths TSV** — same features × samples shape (§6) | differentialabundance RNA-seq runs, referenced from `params.yml` as `transcript_length_matrix` |
 | `*.sdrf.tsv` — the SDRF sample table (**not** a CSV samplesheet) | quantmsdiann, its `--input` |
 | `metadata.tsv` | optional; the skills read it *locally* to infer species (§5), so push it only if the user wants it stored beside the run |
 
@@ -1452,10 +1491,11 @@ that needs two earlier jobs to have finished.
   are submitted **now**, not when its turn comes, so they must already be on the cluster and complete
   before stage 1 goes in (§9.4.0). Push everything, then submit in order.
 - **A later stage's input paths are written up front, and cannot be pre-flighted.** The rnaseq
-  samplesheet names FASTQs the download job has not fetched yet; the differentialabundance `matrix` is a
-  file rnaseq will only write into its `$outdir` (§4.3). Those paths are **predicted from the earlier
-  stage's output layout** and written into the samplesheet / `params.yml` before anything is submitted,
-  because **nothing can edit a job that is already queued**. Say this plainly to the user: a file that
+  samplesheet names FASTQs the download job has not fetched yet; the differentialabundance `matrix` **and**
+  `transcript_length_matrix` are files rnaseq will only write into its `$outdir` (§4.3, and §6 for their
+  names). Those paths are **predicted from the earlier stage's output layout** and written into the
+  samplesheet / `params.yml` before anything is submitted, because **nothing can edit a job that is
+  already queued**. Say this plainly to the user: a file that
   does not exist yet was not checked, and a mispredicted path fails at the start of that stage, hours
   later. Where a path cannot be predicted with confidence, do not chain that stage — submit it on its
   own once the previous one has finished.

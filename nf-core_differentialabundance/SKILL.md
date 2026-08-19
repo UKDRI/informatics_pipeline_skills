@@ -53,10 +53,19 @@ samplesheet):
   (`strsplit(opt$blocking_variables, split = ';')` in `deseq_de.R` and `limma_de.R`). A colon list is
   **not** rejected: it is read as one variable name, `make.names()` mangles it, and the model is
   silently wrong.
-- **`matrix` TSV** — the abundance matrix (features × samples; e.g. counts from nf-core/rnaseq).
-  There must be a column for every row of the samplesheet. Goes in `params.yml`. (Not required when
-  supplying CEL files for affy preprocessing.) For `--study-type mass_spec` the feature-ID column must
-  be named `Genes` — see §4.1 below.
+- **`matrix` TSV** — the abundance matrix (features × samples). There must be a column for every row
+  of the samplesheet. Goes in `params.yml`. (Not required when supplying CEL files for affy
+  preprocessing.) For RNA-seq this is the **merged gene counts matrix** from the nf-core/rnaseq run —
+  `star_rsem/rsem.merged.gene_counts.tsv` or `star_salmon/salmon.merged.gene_counts.tsv` under that
+  run's `out/`, depending on its aligner (DESIGN.md §6 is the authoritative list). Hand the counts over
+  **exactly as rnaseq wrote them: do not round them to integers and do not pre-process them.** For
+  `--study-type mass_spec` the feature-ID column must be named `Genes` — see §4.1 below.
+- **gene lengths TSV** (`transcript_length_matrix`) — **RNA-seq only**, and the recommended companion to
+  the counts matrix: the `*.merged.gene_lengths.tsv` sitting beside it in the *same* aligner directory.
+  Optional to the pipeline, but supplying it is what lets DESeq2 model gene-length bias across samples —
+  and is why the counts need no integer rounding. Goes in `params.yml`; seeded as a placeholder by
+  `templates/params_rnaseq.yml` (§4.1). Leave it unset only when the counts did not come from
+  nf-core/rnaseq and no matching lengths file exists.
 
 If any of these is missing, ask the user for it before building.
 
@@ -139,8 +148,9 @@ column is the only real fix.
 
 ## 3. Gather parameters
 Ask the user for: the samplesheet path (`--input`), a results directory on `/data`, the `contrasts`
-CSV and `matrix` TSV paths, a `study_name`, the **species** (`--species mouse|human`), the
-**study type** (`--study-type`, see §4.1 below), and any other non-default parameters.
+CSV and `matrix` TSV paths, the gene lengths TSV for an RNA-seq run (`transcript_length_matrix`, §2), a
+`study_name`, the **species** (`--species mouse|human`), the **study type** (`--study-type`, see §4.1
+below), and any other non-default parameters.
 
 If the contrasts still have to be written — or the user's sheet has no `id` column — build it first
 with `scripts/contrasts.py build` (§2.1), then pass that file to `build_job.py`.
@@ -152,6 +162,7 @@ UKDRI house recommendations, applied automatically from `templates/params.yml` a
 |---|---|---|
 | `gprofiler2_run` | `false` | `true` |
 | `gprofiler2_min_diff` | `1` | `5` |
+| `transcript_length_matrix` | *unset* | the rnaseq gene lengths TSV (RNA-seq runs; §2) |
 
 ## 4. Generate `params.yml` (+ optional custom config)
 Run the skill's Python API. It rejects unknown keys and out-of-enum values against
@@ -165,13 +176,14 @@ python3 scripts/build_job.py \
     --input /data/$USER/PROJECT/samplesheet.csv \
     --resdir /data/$USER/PROJECT/differentialabundance \
     --set contrasts=/data/$USER/PROJECT/contrasts.csv \
-    --set matrix=/data/$USER/PROJECT/matrix.tsv \
+    --set matrix=/data/$USER/PROJECT/rnaseq/out/star_rsem/rsem.merged.gene_counts.tsv \
+    --set transcript_length_matrix=/data/$USER/PROJECT/rnaseq/out/star_rsem/rsem.merged.gene_lengths.tsv \
     --set study_name=my_study \
     --dest /data/$USER/PROJECT/differentialabundance
 ```
-- `contrasts`, `matrix` and `study_name` ship as `/data/$USER/PROJECT/…` placeholders in the template.
-  Nextflow does **not** expand `$USER` in a params file, so always override all three with `--set`
-  (as above) or hand-edit them before submitting.
+- `contrasts`, `matrix`, `study_name` — and, for RNA-seq, `transcript_length_matrix` — ship as
+  `/data/$USER/PROJECT/…` placeholders in the templates. Nextflow does **not** expand `$USER` in a params
+  file, so always override every one of them with `--set` (as above) or hand-edit them before submitting.
 - Unknown keys or out-of-enum values (e.g. `--set study_type=bogus`) are rejected with a hard error.
 - If the `contrasts` path is a readable local file it is validated first (§2.1); a bad contrast id
   aborts the build and no `params.yml` is written.
@@ -190,7 +202,7 @@ switches which species files are used:
 
 | `--study-type` | Overlay file | Effect |
 |---|---|---|
-| `rnaseq` (default) | *(none needed)* | DESeq2's defaults already fit |
+| `rnaseq` (default) | `params_rnaseq.yml` | the nf-core/rnaseq handoff: `matrix` (merged gene counts) + `transcript_length_matrix` (merged gene lengths) as `star_rsem/…` placeholders — override both with `--set`. DESeq2's own defaults already fit, so nothing else is set |
 | `mass_spec` | `params_mass_spec.yml` | limma results columns (`logFC` / `P.Value` / `adj.P.Val`), the exploratory assay chain ending in `vsn`, and all four feature columns → `Genes`. Also switches the species-filled gene sets and background, and drops `gtf` — see "Species selection" |
 | `affy_array`, `maxquant`, `geo_soft_file` | *(none yet)* | base recommendations only |
 
@@ -240,8 +252,8 @@ run.
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_differentialabundance.sh` and `params.yml`, and
 that the **`slurm` skill** takes it from here: it transfers the job script, `params.yml`, the
-samplesheet, the `contrasts.csv` that `contrasts.py build` wrote (§2.1) and the `matrix` TSV to the
-HPC, submits
+samplesheet, the `contrasts.csv` that `contrasts.py build` wrote (§2.1), the `matrix` TSV and — for an
+RNA-seq run — the gene lengths TSV to the HPC, submits
 `run_nfcore_differentialabundance.sh` with `sbatch` (from the directory holding `params.yml`, which the
 script references by relative path), and reports the job id. Running `sbatch` on the cluster by hand is
 equally fine. Never submit the job yourself from this skill.

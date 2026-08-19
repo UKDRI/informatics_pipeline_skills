@@ -1,0 +1,15 @@
+# params_rnaseq.yml — nf-core:differentialabundance, RNA-seq overlay.
+# Loaded on top of params.yml for the default study type (rnaseq); --set still wins.
+#
+# The nf-core:rnaseq handoff is TWO files from the same aligner directory of that run's
+# $outdir (= $resdir/out) — the merged gene counts matrix and the merged gene lengths
+# file. Both paths below are placeholders: Nextflow does not expand $USER in a params
+# file, so override both with --set (SKILL.md §4). DESIGN.md §6 lists the filenames per
+# aligner (star_rsem — the nf-core_rnaseq recommendation — vs star_salmon).
+#
+# The counts go in AS WRITTEN — do not round them to integers or pre-process them.
+# Supplying the gene lengths is what lets DESeq2 model length bias across samples, and is
+# why no integer coercion is needed. transcript_length_matrix is RNA-seq-only, which is
+# why it lives in this overlay and not in the base params.yml.
+matrix: /data/$USER/PROJECT/rnaseq/out/star_rsem/rsem.merged.gene_counts.tsv
+transcript_length_matrix: /data/$USER/PROJECT/rnaseq/out/star_rsem/rsem.merged.gene_lengths.tsv

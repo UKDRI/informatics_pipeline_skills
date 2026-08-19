@@ -211,11 +211,12 @@ python3 scripts/slurm_ops.py submit --user <username> --host <hostname> \
 - **Each link counts against the 100-job cap** — a queued dependent job is pending from the moment it is
   submitted, so a three-stage chain takes three slots before any of it has run.
 - **The downstream input paths have to be written up front and cannot be checked.** The rnaseq
-  samplesheet names FASTQs the download has not fetched yet; the differentialabundance `matrix` is a file
-  rnaseq has not written yet. Predict them from the earlier stage's output directory, write them into the
-  samplesheet / `params.yml` **before** submitting, and tell the user plainly that those files were not
-  verified — nothing can edit a job once it is queued. If a path cannot be predicted confidently, do not
-  chain that stage; submit it when the previous one has finished.
+  samplesheet names FASTQs the download has not fetched yet; the differentialabundance `matrix` **and**
+  `transcript_length_matrix` are files rnaseq has not written yet — the merged gene counts and gene lengths
+  TSVs in its `out/<aligner>/` directory (DESIGN.md §6). Predict them from the earlier stage's output
+  directory, write them into the samplesheet / `params.yml` **before** submitting, and tell the user
+  plainly that those files were not verified — nothing can edit a job once it is queued. If a path cannot
+  be predicted confidently, do not chain that stage; submit it when the previous one has finished.
 - **If a stage fails, everything behind it is stuck**, pending forever as `DependencyNeverSatisfied`.
   `cancel` those, fix that stage, and re-submit the rest. Keep its `work` if you intend to `-resume`.
 - **Report every link back**: folder, job id, and what each one waits on.
