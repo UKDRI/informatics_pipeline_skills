@@ -63,6 +63,8 @@ Follow these exactly, every time. They are enforced in the script too, but they 
    never treat "it's only reading" as a reason to relax it. It also holds for **paths the cluster hands
    back**: a `WorkDir` or `StdOut` from `scontrol` can point at a shared area, so it is checked before
    being read or offered as a cleanup target, and reported rather than followed when it fails.
+   The authoritative list of these prefixes is `assets/user_dirs.json` (`user_dir_prefixes`); the
+   script reads it from there, so keep this list in step with it. The one exception is rule 8.
 5. **Never delete, overwrite, create, or download anything without the user's permission.** Every
    state-changing subcommand prints its plan and stops; you show that plan to the user, and only
    after they agree do you re-run with `--confirm`. Never pass `--confirm` on the first call.
@@ -72,6 +74,21 @@ Follow these exactly, every time. They are enforced in the script too, but they 
 6. **Never a glob in a path.** No `rm -rf *`, no `rm -r *`, no wildcards anywhere. One literal full
    path per call: `rm -rf /data/<user>/project_1/nfcore/scrnaseq/work`.
 7. **Report faithfully.** Show the user the real command output, the real job id, the real state.
+8. **Shared project folders — allowed only when configured, and always with a warning.** A path under
+   a root listed in `project_roots` of `assets/user_dirs.json` (**empty by default**) is allowed as
+   `<root>/<project>/<at least one more level>`, but only if the user is a member of the group that
+   owns `<root>/<project>`. The script checks that on the cluster and refuses otherwise.
+   - **Advise caution every time.** Before any transfer, download, submit or cleanup there, tell the
+     user plainly that this is a **shared team area**: other people's data lives there, and anything
+     written, overwritten or deleted affects their teammates. Name the project folder, and get the
+     user's go-ahead for that folder specifically. The script prints a `NOTE: … SHARED project
+     folder` line whenever this applies; never skip passing it on.
+   - A download there may include teammates' files, but only files in the project group (§4b).
+     A cleanup there removes **only the user's own files** (§8).
+   - **Never add or change a root in `assets/user_dirs.json` unless the user asks.** If they ask,
+     first explain that each project folder under it must belong to a **dedicated project group**
+     with the setgid bit (`chmod g+s`). A folder owned by a group everyone is in (e.g. `users`) would
+     open it to everyone. Never list `/`, a user-directory prefix, or a software/reference tree.
 
 ## 3. Ask first, then act
 Before the first cluster command, collect:
@@ -117,14 +134,18 @@ run from Bash is never acceptable.
 **Rule 0 for downloads — only the user's own results, checked two ways.** Another user's data is never
 downloaded, and there is no override:
 1. **The path** must contain the username, under `/data`, `/nfsdata`, `/home`, `/shared/home`, or
-   `/scratch`. Another user's directory (`/data/<someone-else>/…`), a shared project area, or any other
-   root is refused before a single file is listed.
+   `/scratch`. Another user's directory (`/data/<someone-else>/…`), an unlisted shared area, or any
+   other root is refused before a single file is listed. The only exception is a configured shared
+   project folder the user is in the group of (rule 8).
 2. **The ownership** must match — a directory under your own path can still hold someone else's files.
    The check is done by **`find -user` on the cluster** (never by comparing owner names locally, where a
    uid/name mix-up would flag the user's own files), after a `id -u <username>` pre-flight; an account
    the HPC does not recognise stops the command. It **refuses the whole download if anything belongs to
    another user**, naming the files. Narrow `--remote` to a directory holding only the user's own
    results; never try to filter the foreign files out.
+3. **In a shared project folder** (rule 8) the same two checks test the **project group** instead of
+   the owner: teammates' files in that group are downloaded, and any file outside the group stops the
+   download. Remind the user that they are pulling data that may belong to teammates.
 
 Do not look for a way around either check.
 
@@ -287,6 +308,10 @@ Only these are removable, matched on the final path component:
   re-downloaded before a run can be repeated.
 - To clear several files of one kind, list them first, show the user, then remove them **one explicit
   path at a time**. Never a glob.
+- **In a shared project folder** (rule 8) cleanup removes **only the user's own files**. If anything
+  under the target belongs to someone else, it refuses and lists the owners. Tell the user to ask
+  those owners, or to narrow `--path`. Never look for a way around it. Even when every file is
+  theirs, warn the user before confirming that it is a shared area.
 
 ## 9. Unpacking archives on the cluster
 Compressed input data (PRIDE `.zip`, `.tar.gz` elsewhere) is unpacked by a **job**, never on a login

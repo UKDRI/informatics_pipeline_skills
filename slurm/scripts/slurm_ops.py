@@ -14,6 +14,12 @@ Hard rules implemented here (DESIGN.md §9.2, §9.3):
     at least one level below it, absolute and glob-free. This applies to a download
     SOURCE as much as to a write target: data is never pulled from another user's
     directory, and there is no flag to override that.
+  * The one exception is an opted-in shared project folder (<root>/<project>/...):
+    allowed only when the user is in the group that owns <root>/<project>, checked on
+    the cluster, failing closed. A download there is group-checked instead of
+    owner-checked; a cleanup there still removes only the user's own files.
+  * Both lists of allowed roots are data, in assets/user_dirs.json (project roots
+    empty by default). A missing or malformed file stops the script — no fallback.
   * Nothing is created, overwritten, or deleted without --confirm: without it every
     state-changing subcommand prints its plan and stops. A download writes to the
     local disk, so it is gated the same way.
@@ -30,12 +36,23 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import posixpath
 import re
 import shlex
 import subprocess
 import sys
+from typing import NamedTuple
+
+# --------------------------------------------------------------------------- #
+# Paths (resolved relative to this script: slurm/scripts/slurm_ops.py)
+# --------------------------------------------------------------------------- #
+# realpath, not abspath: the skill is normally reached through a symlink in
+# ~/.claude/skills, and only realpath follows that back into the clone (DESIGN.md §2).
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+SKILL_DIR = os.path.dirname(SCRIPT_DIR)
+ASSETS_DIR = os.path.join(SKILL_DIR, "assets")
 
 # --------------------------------------------------------------------------- #
 # Constants (DESIGN.md §9.3, §9.4.1, §9.4.3)
@@ -43,15 +60,9 @@ import sys
 # Never prompt for a password; key-based auth only.
 SSH_OPTS = ["-o", "BatchMode=yes"]
 
-# The user's own standard directories. A remote path must start with one of these
-# followed by the username, and must go at least one component deeper.
-USER_DIR_PREFIXES = (
-    "/data",
-    "/nfsdata",
-    "/home",
-    "/shared/home",
-    "/scratch",
-)
+# The allowed roots — the user's own standard directories and any shared project
+# roots — are data, not code: USER_DIR_PREFIXES and PROJECT_ROOTS are loaded from
+# assets/user_dirs.json by load_path_roots() below (DESIGN.md §9.3).
 
 # A user may have at most this many jobs in the queue (running + pending).
 MAX_JOBS = 100
@@ -150,79 +161,230 @@ def parse_size(text: str) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Allowed roots (DESIGN.md §9.3) — data in assets/user_dirs.json, never constants here
+# --------------------------------------------------------------------------- #
+ROOT_RE = re.compile(r"(/[^/]+)+")
+
+
+def load_path_roots() -> tuple:
+    """Return (user_dir_prefixes, project_roots) from assets/user_dirs.json.
+
+    The file IS the §9.3 safety boundary, so it fails closed: a missing or malformed
+    file stops the script — there is no built-in list to fall back on. Every entry must
+    be an absolute, normalised, literal path below '/'. A project root may not equal or
+    contain a user-directory prefix (with '/data' as a project root, every
+    /data/<other-user> would pass as a "project"), nor nest inside another project root.
+    """
+    path = os.path.join(ASSETS_DIR, "user_dirs.json")
+    if not os.path.isfile(path):
+        die(f"missing path allow-list: {path}\n"
+            "       it belongs in the slurm skill's assets/ folder (DESIGN.md §2, §9.3)")
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except ValueError as exc:
+        die(f"{path} is not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        die(f"{path}: must be a JSON object")
+
+    def roots(key: str, required: bool) -> tuple:
+        value = data.get(key) if required else data.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            die(f"{path}: '{key}' must be a list of path strings")
+        if required and not value:
+            die(f"{path}: '{key}' must not be empty")
+        for root in value:
+            if (not ROOT_RE.fullmatch(root) or posixpath.normpath(root) != root
+                    or ".." in root.split("/")
+                    or any(c in root for c in "~$" + GLOB_CHARS)):
+                die(f"{path}: '{key}' entry {root!r} must be an absolute, normalised, literal "
+                    "path below '/' — no trailing slash, '..', '~', '$' or wildcards")
+        return tuple(value)
+
+    prefixes = roots("user_dir_prefixes", required=True)
+    projects = roots("project_roots", required=False)
+    for root in projects:
+        for prefix in prefixes:
+            if root == prefix or prefix.startswith(root + "/"):
+                die(f"{path}: project root {root!r} equals or contains the user-directory "
+                    f"prefix {prefix!r}, so every user's own directory would pass as a shared "
+                    "project. List a dedicated folder for shared projects instead.")
+        for other in projects:
+            if other != root and other.startswith(root + "/"):
+                die(f"{path}: project root {other!r} is nested inside project root {root!r}; "
+                    "a path below it would belong to two projects at once.")
+    return prefixes, projects
+
+
+USER_DIR_PREFIXES, PROJECT_ROOTS = load_path_roots()
+
+
+class Project(NamedTuple):
+    """A shared project folder a path was admitted under (§9.3, shared project roots)."""
+    folder: str
+    gid: str
+    group: str
+
+
+# --------------------------------------------------------------------------- #
 # Path guard (DESIGN.md §9.3)
 # --------------------------------------------------------------------------- #
-def guard_path(path: str, username: str) -> str:
-    """Validate a remote path and return it normalised.
-
-    All of these must hold: absolute; no glob, '~' or unexpanded '$VAR'; inside one
-    of USER_DIR_PREFIXES as <prefix>/<username>/...; at least one level below that
-    user directory. Anything else is refused, naming the check that failed.
-    """
+def literal_path_problem(path: str) -> str:
+    """Why `path` is not an absolute, literal path; '' if it is (§9.3 rules 1, 4)."""
     if not path:
-        die("empty remote path.")
+        return "empty remote path."
     if not path.startswith("/"):
-        die(f"remote path is not absolute: {path!r} (§9.3 rule 1). Give the full path.")
+        return f"remote path is not absolute: {path!r} (§9.3 rule 1). Give the full path."
     if "~" in path:
-        die(f"remote path contains '~': {path!r} (§9.3 rule 1). Give the full path.")
+        return f"remote path contains '~': {path!r} (§9.3 rule 1). Give the full path."
     if "$" in path:
-        die(
+        return (
             f"remote path contains an unexpanded variable: {path!r} (§9.3 rule 1). "
             "Templates use ${USER}/PLACEHOLDER forms; pass the resolved path instead."
         )
     if any(c in path for c in GLOB_CHARS):
-        die(f"remote path contains a wildcard: {path!r} (§9.3 rule 4). Name one literal path.")
+        return f"remote path contains a wildcard: {path!r} (§9.3 rule 4). Name one literal path."
+    if ".." in posixpath.normpath(path).split("/"):
+        return f"remote path contains '..': {path!r} (§9.3 rule 1)."
+    return ""
 
-    clean = posixpath.normpath(path)
-    if clean != path.rstrip("/") and clean != path:
-        die(f"remote path is not normalised: {path!r} — pass {clean!r} instead.")
-    if ".." in clean.split("/"):
-        die(f"remote path contains '..': {path!r} (§9.3 rule 1).")
 
+def locate_path(clean: str, username: str) -> tuple[str, str]:
+    """Where a normalised path sits — a string check only, nothing is run remotely.
+
+    Returns ('user', <prefix>/<username>) or ('project', <root>/<project>), or
+    ('', reason) when the path is outside every allowed root or is not at least one
+    level below the user directory / project folder (§9.3 rules 2, 3). User
+    directories are matched first.
+    """
     for prefix in USER_DIR_PREFIXES:
         userdir = f"{prefix}/{username}"
         if clean == prefix or clean == userdir:
-            die(
+            return "", (
                 f"refusing to operate on {clean!r}: that is a top-level or user directory "
                 f"(§9.3 rule 3). Give a path at least one level below {userdir}."
             )
         if clean.startswith(userdir + "/"):
-            return clean
+            return "user", userdir
+
+    for root in PROJECT_ROOTS:
+        if clean == root:
+            return "", (
+                f"refusing to operate on {clean!r}: that is a shared project root (§9.3 rule 3). "
+                f"Give a path at least one level below a project folder, {root}/<project>/..."
+            )
+        if clean.startswith(root + "/"):
+            projectdir = f"{root}/{clean[len(root) + 1:].split('/')[0]}"
+            if clean == projectdir:
+                return "", (
+                    f"refusing to operate on {clean!r}: that is a shared project folder itself "
+                    f"(§9.3 rule 3). Give a path at least one level below it."
+                )
+            return "project", projectdir
 
     allowed = ", ".join(f"{p}/{username}/..." for p in USER_DIR_PREFIXES)
-    die(
+    reason = (
         f"remote path {clean!r} is outside the user's own directories (§9.3 rule 2). "
         f"It must contain the username {username!r} under one of: {allowed}"
     )
+    if PROJECT_ROOTS:
+        shared = ", ".join(f"{r}/<project>/..." for r in PROJECT_ROOTS)
+        reason += f"; or sit in a shared project folder you have group access to: {shared}"
+    return "", reason
 
 
-def in_user_path(path: str, username: str) -> bool:
-    """True if `path` passes the §9.3 guard — without exiting on failure.
+def project_access(user: str, host: str, projectdir: str) -> tuple[Project | None, str]:
+    """(Project, '') if `user` is in the group owning `projectdir`, else (None, reason).
+
+    Run on the cluster with numeric ids — find's -printf %G is the numeric gid and
+    `id -G` the numeric group list — so no name/number letter mix-up can creep in (see
+    remote_file_sizes). `-type d` without -L also refuses a symlinked project folder.
+    Never raises, and fails closed: a check that could not run is a refusal.
+    """
+    res = run_remote(
+        user, host,
+        ["find", projectdir, "-maxdepth", "0", "-type", "d", "-printf", "%G\\t%g\\n"],
+        echo=False, check=False,
+    )
+    gid, _, group = res.stdout.strip().partition("\t") if res.returncode == 0 else ("", "", "")
+    if not gid.isdigit():
+        return None, (
+            f"could not read the group of the shared project folder {projectdir} — it is "
+            "missing, not a real directory, or unreadable"
+        )
+    res = run_remote(user, host, ["id", "-G", user], echo=False, check=False)
+    groups = res.stdout.split() if res.returncode == 0 else []
+    if not groups:
+        return None, f"could not list {user}'s groups on the cluster (`id -G {user}` failed)"
+    if gid not in groups:
+        return None, (
+            f"{user} is not a member of the group {group or gid} (gid {gid}) that owns the "
+            f"shared project folder {projectdir}"
+        )
+    return Project(projectdir, gid, group or gid), ""
+
+
+def guard_path(path: str, user: str, host: str) -> tuple[str, Project | None]:
+    """Validate a remote path; return it normalised, plus the project it sits in.
+
+    All of these must hold: absolute; no glob, '~' or unexpanded '$VAR'; inside one
+    of USER_DIR_PREFIXES as <prefix>/<user>/..., or one of PROJECT_ROOTS as
+    <root>/<project>/... with `user` in the group owning <root>/<project>; at least one
+    level below that directory. Anything else is refused, naming the check that failed.
+    The project is None for a path in the user's own directory.
+    """
+    problem = literal_path_problem(path)
+    if problem:
+        die(problem)
+    clean = posixpath.normpath(path)
+    if clean != path.rstrip("/") and clean != path:
+        die(f"remote path is not normalised: {path!r} — pass {clean!r} instead.")
+
+    scope, where = locate_path(clean, user)
+    if not scope:
+        die(where)
+    if scope == "user":
+        return clean, None
+
+    project, reason = project_access(user, host, where)
+    if project is None:
+        die(f"refusing {clean!r}: {reason} (§9.3 rule 2).")
+    info(f"NOTE: {clean} is in the SHARED project folder {project.folder} (group {project.group}). "
+         "Other people's data lives here, and what is written or deleted affects them — take care.")
+    return clean, project
+
+
+def in_allowed_path(path: str, user: str, host: str) -> tuple[bool, str]:
+    """(True, '') if `path` passes the §9.3 guard, else (False, reason) — never exits.
 
     For paths the CLUSTER hands back (scontrol WorkDir/StdOut, sacct fields): they
     are checked before being read or offered, so a job that ran outside the user's
-    own directories is reported rather than followed.
+    own directories — or in a project folder the user has no group access to — is
+    reported rather than followed.
     """
-    if not path or not path.startswith("/") or "~" in path or "$" in path:
-        return False
-    if any(c in path for c in GLOB_CHARS):
-        return False
-    clean = posixpath.normpath(path)
-    if ".." in clean.split("/"):
-        return False
-    return any(
-        clean.startswith(f"{prefix}/{username}/") for prefix in USER_DIR_PREFIXES
-    )
+    problem = literal_path_problem(path)
+    if problem:
+        return False, problem
+    scope, where = locate_path(posixpath.normpath(path), user)
+    if not scope:
+        return False, where
+    if scope == "project":
+        project, reason = project_access(user, host, where)
+        if project is None:
+            return False, reason
+    return True, ""
 
 
-def require_user_path(path: str, username: str, what: str) -> str:
+def require_allowed_path(path: str, user: str, host: str, what: str) -> str:
     """Guard a cluster-reported path before reading it; empty string if it fails."""
     if not path:
         return ""
-    if not in_user_path(path, username):
+    ok, reason = in_allowed_path(path, user, host)
+    if not ok:
         warn(
-            f"{what} is outside {username}'s own directories: {path} — not reading it "
-            "(§9.3 applies to paths the cluster reports back, not just paths you type)."
+            f"{what} is not somewhere {user} may read: {path} — not reading it "
+            f"({reason}; §9.3 applies to paths the cluster reports back, not just paths "
+            "you type)."
         )
         return ""
     return path
@@ -360,18 +522,37 @@ def remote_probe(user: str, host: str, argv: list, what: str) -> str:
 # --------------------------------------------------------------------------- #
 # transfer (DESIGN.md §9.4.0)
 # --------------------------------------------------------------------------- #
-def rsync_argv(sources: list, user: str, host: str, dest: str, progress: bool) -> list:
+def rsync_argv(
+    sources: list, user: str, host: str, dest: str, progress: bool, shared: bool = False
+) -> list:
     argv = ["rsync", "-avh"]
     if progress:
         argv.append("-P")           # --partial --progress: an interrupted push resumes
+    if shared:
+        # Into a shared project folder: don't carry the laptop's group over; the
+        # folder's setgid bit gives new files the project group instead (§9.3).
+        argv.append("--no-group")
     argv += ["-e", "ssh " + " ".join(SSH_OPTS)]
     argv += sources
     argv.append(f"{target(user, host)}:{dest}/")   # trailing '/': dest is the directory
     return argv
 
 
+def setgid_missing(user: str, host: str, folder: str) -> bool:
+    """True if `folder` is known to lack the setgid bit — advisory, so unknown reads False."""
+    mode = remote_text(user, host, ["find", folder, "-maxdepth", "0", "-printf", "%m"]).strip()
+    return mode.isdigit() and not (len(mode) == 4 and int(mode[0]) & 2)
+
+
 def cmd_transfer(args: argparse.Namespace) -> None:
-    dest = guard_path(args.dest, args.user)
+    dest, project = guard_path(args.dest, args.user, args.host)
+    if project and setgid_missing(args.user, args.host, project.folder):
+        warn(
+            f"the shared project folder {project.folder} does not have the setgid bit, so "
+            f"what you push gets your primary group rather than {project.group}. Teammates "
+            "may then be unable to read it, and their `download` refuses files outside the "
+            f"project group. Ask the folder's owner to run: chmod g+s {project.folder}"
+        )
 
     sources = []
     for p in args.path:
@@ -379,7 +560,8 @@ def cmd_transfer(args: argparse.Namespace) -> None:
             die(f"local path does not exist: {p}")
         sources.append(p.rstrip("/") if os.path.isdir(p) else p)
 
-    argv = rsync_argv(sources, args.user, args.host, dest, args.progress)
+    argv = rsync_argv(sources, args.user, args.host, dest, args.progress,
+                      shared=project is not None)
 
     # --print-only: hand the command to the user and touch nothing (DESIGN.md §9.4.0).
     if args.print_only:
@@ -438,7 +620,15 @@ def remote_uid(user: str, host: str) -> str:
     return remote_text(user, host, ["id", "-u", user]).strip()
 
 
-def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list:
+def ownership_test(user: str, project: Project | None) -> list:
+    """The `find` predicate for "ours": owned by `user`, or — in a shared project
+    folder (§9.3) — belonging to the project's group (numeric gid)."""
+    return ["-group", project.gid] if project else ["-user", user]
+
+
+def remote_file_sizes(
+    user: str, host: str, path: str, skip_dirs: tuple, project: Project | None = None
+) -> list:
     """[(is_foreign, size, path), ...] for every regular file under `path`.
 
     Ownership is decided by `find -user` ON THE CLUSTER, never by comparing owner
@@ -446,7 +636,8 @@ def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list
     `stat` uses those two letters the other way round. Comparing either against
     --user is how every file in the user's own tree once got flagged as foreign.
     So the remote system resolves the identity and just tags each file:
-    'F' = owned by someone else, 'O' = owned by --user.
+    'F' = owned by someone else, 'O' = owned by --user. In a shared project folder
+    the test is `-group <project gid>` instead, so teammates' files count as 'O'.
 
     Read-only, and WITHOUT -L, so a symlink pointing at another user's data is never
     followed — matching `rsync -a`, which copies it as a symlink.
@@ -456,7 +647,7 @@ def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list
         argv += ["-name", name, "-prune", "-o"]
     argv += [
         "-type", "f", "(",
-        "!", "-user", user, "-printf", "F\\t%s\\t%p\\n",
+        "!", *ownership_test(user, project), "-printf", "F\\t%s\\t%p\\n",
         "-o", "-printf", "O\\t%s\\t%p\\n", ")",
     ]
 
@@ -473,16 +664,17 @@ def remote_file_sizes(user: str, host: str, path: str, skip_dirs: tuple) -> list
     return entries
 
 
-def foreign_owned(user: str, host: str, path: str) -> bool:
-    """True if `path` itself belongs to someone other than `user`.
+def foreign_owned(user: str, host: str, path: str, project: Project | None = None) -> bool:
+    """True if `path` itself belongs to someone other than `user` (or, in a shared
+    project folder, to a group other than the project's).
 
-    Same `-user` predicate as the scan above — the cluster resolves the identity.
+    Same predicate as the scan above — the cluster resolves the identity.
     Uses remote_probe, so a failed check halts instead of reporting "not foreign":
     an ownership test that could not run must never read as one that passed.
     """
     out = remote_probe(
         user, host,
-        ["find", path, "-maxdepth", "0", "!", "-user", user, "-print"],
+        ["find", path, "-maxdepth", "0", "!", *ownership_test(user, project), "-print"],
         f"determine who owns {path}",
     )
     return bool(out.strip())
@@ -494,9 +686,10 @@ def full_rsync_hint(user: str, host: str, remote: str, dest: str) -> list:
 
 
 def cmd_download(args: argparse.Namespace) -> None:
-    # Rule 0: the source must be inside the user's OWN directory. guard_path runs
-    # first, so another user's path is refused before anything is even listed.
-    remote = guard_path(args.remote, args.user)
+    # Rule 0: the source must be inside the user's OWN directory, or a shared project
+    # folder the user is in the group of. guard_path runs first, so another user's path
+    # is refused before anything is even listed.
+    remote, project = guard_path(args.remote, args.user, args.host)
 
     if remote_kind(args.user, args.host, remote) != "dir":
         die(f"remote path is not a directory on the cluster: {remote}")
@@ -512,7 +705,13 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     # Rule 0, second half: the results must BELONG to the user, not merely sit under a
     # path containing their name. A directory owned by someone else is refused here.
-    if foreign_owned(args.user, args.host, remote):
+    # In a shared project folder "belong" means the project's group instead.
+    if project and foreign_owned(args.user, args.host, remote, project):
+        die(
+            f"refusing to download {remote}: it does not belong to the project group "
+            f"{project.group} of {project.folder}. Only data in the project's group is shared."
+        )
+    if not project and foreign_owned(args.user, args.host, remote):
         die(
             f"refusing to download {remote}: it is owned by another user, not {args.user!r} "
             f"(uid {uid}). This skill only downloads the user's own results. Ask the owner for "
@@ -533,7 +732,7 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     # 1. scan
     info(f"Scanning {remote} ...")
-    entries = remote_file_sizes(args.user, args.host, remote, skip_dirs)
+    entries = remote_file_sizes(args.user, args.host, remote, skip_dirs, project)
     if not entries:
         die(f"no files found under {remote} (nothing to download).")
 
@@ -541,6 +740,18 @@ def cmd_download(args: argparse.Namespace) -> None:
     #     something to filter around: rsync would copy it, and this skill never pulls
     #     another user's data.
     foreign = sorted(((s, p) for is_foreign, s, p in entries if is_foreign), reverse=True)
+    if foreign and project:
+        info("")
+        info(f"  files outside the project group {project.group} : {len(foreign)}")
+        for size, path in foreign[:10]:
+            info(f"      {human_size(size):>8}  {path}")
+        if len(foreign) > 10:
+            info(f"      ... and {len(foreign) - 10} more")
+        die(
+            f"refusing to download {remote}: it contains {len(foreign)} file(s) that are not in "
+            f"the project group {project.group} (see above), so they are not shared with the "
+            "project. Narrow --remote to a subdirectory that holds only project data."
+        )
     if foreign:
         info("")
         info(f"  files owned by another user : {len(foreign)}")
@@ -772,7 +983,7 @@ def script_relative_inputs(text: str) -> list:
 
 
 def cmd_submit(args: argparse.Namespace) -> None:
-    script = guard_path(args.script, args.user)
+    script, _ = guard_path(args.script, args.user, args.host)
     rundir = posixpath.dirname(script)
     name = posixpath.basename(script)
     # Checked locally first so a typo costs nothing; job_facts() below is the real check.
@@ -903,11 +1114,12 @@ def cmd_job_status(args: argparse.Namespace) -> None:
         dependency = ""
 
     # Paths reported BY the cluster get the same guard as paths the user types: a job
-    # that ran outside the user's own directories is reported, not read (§9.3).
+    # that ran outside the user's own directories (or a project folder they have no
+    # group access to) is reported, not read (§9.3).
     raw_workdir = fields.get("WorkDir") or sacct_field(args.user, args.host, jobid, "WorkDir")
-    workdir = require_user_path(raw_workdir, args.user, "the job's work directory")
-    stdout_path = require_user_path(
-        fields.get("StdOut", ""), args.user, "the job's SLURM output file"
+    workdir = require_allowed_path(raw_workdir, args.user, args.host, "the job's work directory")
+    stdout_path = require_allowed_path(
+        fields.get("StdOut", ""), args.user, args.host, "the job's SLURM output file"
     )
 
     info("")
@@ -1013,7 +1225,7 @@ def cmd_cancel(args: argparse.Namespace) -> None:
     # Suggest — never perform — cleanup of the half-finished run (DESIGN.md §9.4.4).
     # Only suggest a path that itself passes the guard: the work dir comes from the
     # cluster, so it is checked before being offered as a deletion target.
-    if in_user_path(workdir, args.user):
+    if workdir and in_allowed_path(workdir, args.user, args.host)[0]:
         workpath = posixpath.join(workdir, "work")
         info("")
         info("A cancelled Nextflow run leaves its work directory and .nextflow cache on disk.")
@@ -1027,7 +1239,7 @@ def cmd_cancel(args: argparse.Namespace) -> None:
 # cleanup (DESIGN.md §9.4.1)
 # --------------------------------------------------------------------------- #
 def cmd_cleanup(args: argparse.Namespace) -> None:
-    path = guard_path(args.path, args.user)
+    path, project = guard_path(args.path, args.user, args.host)
 
     kind = remote_kind(args.user, args.host, path)
     if kind == "missing":
@@ -1041,12 +1253,41 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
             "sra/fastq downloads, archives and dataset objects."
         )
 
+    # In a shared project folder the group check only proves the user may be here. What
+    # they may DELETE is still only their own: one teammate's file under the target is a
+    # hard stop (§9.3, shared project roots). -quit keeps the gating probe cheap on a big
+    # work/ tree; the listing after it is display only.
+    if project and remote_probe(
+        args.user, args.host,
+        ["find", path, "!", "-user", args.user, "-print", "-quit"],
+        f"check who owns the files under {path}",
+    ).strip():
+        sample = remote_text(
+            args.user, args.host,
+            ["sh", "-c", 'find "$1" ! -user "$2" -printf "%u\\t%p\\n" | head -n 10',
+             "sh", path, args.user],
+        )
+        info("")
+        info(f"  files under {path} owned by someone else (first 10):")
+        for line in sample.splitlines():
+            owner, _, item = line.partition("\t")
+            info(f"      {owner:>12}  {item}")
+        die(
+            f"refusing to remove {path}: it is in the shared project folder {project.folder} "
+            f"and holds files that belong to other people (see above). In a shared folder this "
+            f"skill only deletes {args.user}'s own files — ask their owners, or narrow --path to "
+            "a directory that holds only yours."
+        )
+
     info("")
     info("Cleanup plan:")
     info(f"  host   : {target(args.user, args.host)}")
     info(f"  target : {path}   ({reason})")
+    if project:
+        info(f"  shared : in the project folder {project.folder} (group {project.group}); "
+             f"everything under the target is {args.user}'s own")
 
-    size = remote_text(args.user, args.host, ["du", "-sh", path]).strip()
+    size =remote_text(args.user, args.host, ["du", "-sh", path]).strip()
     if size:
         info(f"  size   : {size.split()[0]}")
     listing = remote_text(args.user, args.host, ["ls", "-lh", path])

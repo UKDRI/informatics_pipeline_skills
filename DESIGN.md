@@ -125,14 +125,18 @@ Rules:
 
 The structure above describes **pipeline** skills. The `slurm` operations skill (§9) is what actually
 **starts the pipeline runs** — it submits the job scripts the pipeline skills generated — but it is not
-tied to any one pipeline and writes no `params.yml`, so it has **no pinned pipeline `assets/`** (no
+tied to any one pipeline and writes no `params.yml`, so it has **no pipeline-pinned assets** (no
 `nextflow_schema.json`, `nextflow.config`, or `base.config`: there is no single parameter set for it to
-validate against). It does ship **one** job template of its own, for unpacking compressed input data on
-the cluster (§9.4.5):
+validate against). Its `assets/` holds one hand-maintained file instead, `user_dirs.json`: the allowed
+cluster roots behind the §9.3 path guard. Like `genomes.json` it describes the cluster, not a pipeline
+release, so it is not version-pinned and is exempt from the §5 refresh steps. It does ship **one** job
+template of its own, for unpacking compressed input data on the cluster (§9.4.5):
 
 ```
 slurm/
 ├── SKILL.md                 # follows §9, not the §3 pipeline-skill section order
+├── assets/
+│   └── user_dirs.json       # allowed roots: user_dir_prefixes + opt-in project_roots (§9.3)
 ├── templates/
 │   └── run_uncompress.sh    # SLURM job: unzip / tar -xzf an archive on the HPC (§9.4.5)
 └── scripts/
@@ -809,7 +813,8 @@ before it writes `params.yml`.
   - **Never leave a species-mapped param unset** — hard-error per §5.
   - **No hard-coded cluster paths in the script.** Reference file paths are data
     (`<repo-root>/assets/genomes.json`), so adding a species or bumping a release needs no code
-    change.
+    change. The same holds for `slurm_ops.py`: the allowed roots of the §9.3 path guard are data in
+    `slurm/assets/user_dirs.json`, never constants in the script.
   - **Value constraints (where a pipeline defines one).** Validate a parameter's value against a
     stored reference list in `assets/` and **warn (not error)** on a miss. For scdownstream's
     `celltypist_model`:
@@ -974,10 +979,11 @@ A remote path may only be used when **all** of these hold:
 1. **Absolute** — no relative path, no `~`, no unexpanded `$VAR` left in it.
 2. **Inside one of the user's own standard directories**, i.e. it starts with one of the
    **user-directory prefixes** below, with `<username>` being exactly the username the user gave
-   (§9.2). A path that does not contain that username as a path component is **rejected**: it points
-   outside the user's own area. Always check this before the path is used in any command.
-3. **Below the top of the hierarchy** — never operate *on* a user directory itself or on any root
-   above it. The target must sit **at least one level below** the user-directory prefix.
+   (§9.2) — **or inside an opted-in shared project folder** the user is in the group of (see "Shared
+   project roots" below). Any other path is **rejected**: it points outside the user's own area.
+   Always check this before the path is used in any command.
+3. **Below the top of the hierarchy** — never operate *on* a user directory (or project folder)
+   itself or on any root above it. The target must sit **at least one level below** it.
 4. **Literal — no wildcards or globs** — never `*`, `?`, `[...]`, or brace expansion in a path.
 
 The guard applies identically to **all** the standard user directories — it is not specific to
@@ -991,10 +997,49 @@ The guard applies identically to **all** the standard user directories — it is
 | `/shared/home/<username>` | `/shared/home/<username>/project_1` | `/shared/home/<username>`, `/shared/home`, `/shared` |
 | `/scratch/<username>` | `/scratch/<username>/project_1` | `/scratch/<username>`, `/scratch` |
 
-A path under any other root (a shared project area, another user's directory, `/tmp`, `/nfsdata`
+A path under any other root (an unlisted shared area, another user's directory, `/tmp`, `/nfsdata`
 software trees such as `/nfsdata/scripts` or `/nfsdata/apptainer`, `/` itself) is **outside the
-guard** — refuse it and ask the user for a path under one of the prefixes above. The prefix list is a
-constant in `slurm_ops.py`; extend it there, not by loosening the check.
+guard** — refuse it and ask the user for a path under one of the prefixes above.
+
+**The allowed roots are data, not code:** `user_dir_prefixes` and `project_roots` in
+`slurm/assets/user_dirs.json`. Extend them there, never by loosening the check. The file **is** the
+safety boundary, so `slurm_ops.py` fails closed on it: a missing or malformed file — or an entry that is
+not an absolute, normalised, literal path below `/` — stops the script, and there is no built-in list
+to fall back on. The table above mirrors the shipped prefixes; keep it in step with the file.
+
+#### Shared project roots
+
+`project_roots` lets people work together in a project folder. It is **empty by default**; a root is
+added only on purpose, by whoever administers the clone. A path under a project root is allowed as
+`<root>/<project>/<at least one more component>`, and only when:
+
+- `--user` is a **member of the group that owns `<root>/<project>`**. This is checked on the cluster
+  with numeric ids (`find -printf %G` against `id -G <user>`) on every guarded path, so membership is
+  never inferred from names. `<root>/<project>` must be a real directory — a symlink is refused.
+- The check **fails closed**: if the group or the membership cannot be read, the path is refused, and
+  the non-fatal form (cluster-reported paths) reports it rather than reading it.
+
+What may be done there differs from the user's own directory in exactly two places:
+
+| Subcommand | In `<prefix>/<username>/…` | In `<root>/<project>/…` |
+|---|---|---|
+| `download` (§9.4.6) | source and every file must be **owned by the user** | source and every file must be **in the project group** — teammates' files are downloadable; a file outside the group is a hard stop |
+| `cleanup` (§9.4.1) | allow-list + confirm | allow-list + confirm, **and** refused if any file under the target is **owned by someone else** — the user deletes only their own files |
+
+`transfer` pushes with `rsync --no-group` there, so new files take the group from the folder's setgid
+bit instead of the laptop's group, and warns when the project folder lacks setgid. `submit` and
+`job_status` need nothing beyond the guard. Every guarded project path prints a notice that it is a
+shared area; the skill turns that into an explicit warning to the user (`slurm/SKILL.md`).
+
+Rules for the file itself, enforced by the loader where they can be:
+
+- A project root may **not equal or contain a user-directory prefix** (with `/data` as a project root,
+  every `/data/<other-user>` would pass as a "project") — hard error. A root *below* one (e.g.
+  `/data/projects`) is fine. Project roots may not nest inside each other.
+- Only list a root whose project folders each belong to a **dedicated project group** with the setgid
+  bit set. The loader cannot check this: a root whose folders belong to a group everyone is in (e.g.
+  `users`) opens them to everyone.
+- Never list `/`, a software tree, or a shared reference tree such as `/nfsdata/genome`.
 
 Destruction and mutation rules layered on top of the guard:
 
@@ -1017,8 +1062,9 @@ Destruction and mutation rules layered on top of the guard:
 - **Paths the cluster reports back are guarded too.** `scontrol`/`sacct` return a `WorkDir` and a
   `StdOut` that the skill did not choose — a job may have been launched from a shared area. Check them
   before reading them, and before offering one as a `cleanup` target: if such a path is outside the
-  user's own directories, **say so and do not read it** rather than following it. In code this is
-  `in_user_path()` / `require_user_path()`, the non-fatal form of the guard.
+  user's own directories (or in a project folder the user has no group access to), **say so and do
+  not read it** rather than following it. In code this is `in_allowed_path()` /
+  `require_allowed_path()`, the non-fatal form of the guard.
 
 ### 9.4 The six subcommands
 
@@ -1138,6 +1184,12 @@ in the §6 input chain that the user already holds locally:
   rejects an unexpanded `$VAR`; do not expand one on the user's behalf, ask for the real path.
 
 #### 9.4.1 What `cleanup` may remove — the allow-list
+
+In a shared project folder (§9.3, "Shared project roots") the allow-list below applies unchanged, plus
+one more hard stop: if anything under the target is owned by someone other than `--user`
+(`find <target> ! -user <username> -print -quit`, fail closed), the removal is refused and up to ten
+offending files are listed with their owners. A user can clear their own `work/` in a shared folder,
+never a teammate's data.
 
 `cleanup` is restricted to the intermediate, regenerable, and bulk-input artifacts that follow the
 pipeline skills' output conventions (§4.3, §4.8). The decision is made on the **final component of the
@@ -1363,6 +1415,10 @@ and no flag overrides this.**
      Tell the user to narrow the source to a directory holding only their own results.
    - **if either check cannot run, refuse** (§9.6): a `find` that exits non-zero says nothing about
      ownership, so its empty output must never be read as "owned by the user".
+3. **In a shared project folder** (§9.3, "Shared project roots") both checks above test the **project
+   group** instead of the owner: `! -group <project gid>` (numeric) in place of `! -user <username>`.
+   Teammates' files in the group are downloadable; a file outside the group is a hard stop, reported
+   the same way. The path must first pass the group-membership guard.
 
 Two further points the implementation honours:
 

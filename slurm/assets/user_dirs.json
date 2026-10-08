@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Where the slurm skill may read, write and delete on the cluster: the DESIGN.md 9.3 safety",
+    "boundary, read by slurm/scripts/slurm_ops.py. Hand-maintained cluster data, not version-pinned.",
+    "A missing or malformed file makes slurm_ops.py refuse to run; there is no built-in fallback.",
+    "",
+    "user_dir_prefixes -> roots of each user's OWN directory. A remote path is allowed only as",
+    "                     <prefix>/<username>/<at least one more component>, and a download or a",
+    "                     cleanup there acts only on files that user owns.",
+    "project_roots     -> OPTIONAL shared project areas, empty by default. A remote path is allowed",
+    "                     as <root>/<project>/<at least one more component> only when the user is a",
+    "                     member of the group that owns <root>/<project> (checked on the cluster,",
+    "                     by numeric gid). Teammates' files there in the project group can be",
+    "                     downloaded; cleanup still removes only the user's own files.",
+    "",
+    "Only list a project root whose project folders each belong to a DEDICATED project group with",
+    "the setgid bit set (chmod g+s). A root whose folders belong to a group everyone is in (e.g.",
+    "'users') opens them to everyone. Never list '/', a user_dir_prefixes entry or a folder above",
+    "one, or a software/reference tree such as /nfsdata/genome or /nfsdata/apptainer.",
+    "Entries are absolute, normalised, literal paths: no trailing slash, '..', '~', '$' or wildcards."
+  ],
+  "user_dir_prefixes": [
+    "/data",
+    "/nfsdata",
+    "/home",
+    "/shared/home",
+    "/scratch"
+  ],
+  "project_roots": []
+}
