@@ -21,12 +21,12 @@ import yaml
 # Per-skill configuration (the ONLY part that differs between skills)
 # --------------------------------------------------------------------------- #
 CONFIG = {
-    "pipeline_id": "nf-core:scrnaseq",
+    "pipeline_id": "nf-core:sopa",
     # entry name -> template / params file / required-input schema key.
     # "" is the single-entry case (no -entry flag).
     "entries": {
         "": {
-            "template": "run_nfcore_scrnaseq.sh",
+            "template": "run_nfcore_sopa.sh",
             "params_file": "params.yml",
             "input_flag": "input",
             "input_var": "samplesheet",  # bash variable in the template holding the input path
@@ -34,8 +34,16 @@ CONFIG = {
     },
     # param -> assets JSON file for advisory free-text value lists (warn, not error).
     "value_lists": {},
-    # schema param -> genomes.json key; filled from --species (mouse/human), overridable via --set.
-    "species_map": {'fasta': 'fasta', 'gtf': 'gtf'},
+    # schema param -> genomes.json key; sopa uses no species-specific reference here.
+    "species_map": {},
+    # Technology presets: upstream picks them with a predefined -profile; here --technology
+    # writes `technology` and layers templates/params_<technology>.yml (the translated preset)
+    # over params.yml. Required: the nextflow.config default (xenium) is never assumed.
+    "variants": {
+        "param": "technology",                        # also names the flag: --technology
+        "params_file_pattern": "params_{value}.yml",  # in templates/; loaded only if it exists
+        "required": True,
+    },
 }
 
 # --------------------------------------------------------------------------- #

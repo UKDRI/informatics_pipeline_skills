@@ -1,0 +1,9 @@
+# params_xenium.yml — overlay for --technology xenium (10x Genomics Xenium)
+# Upstream preset ../assets/predefined/xenium_proseg.config: Proseg on one transcript patch,
+# with the 10x segmentation as its prior ('auto'). Other presets: xenium_baysor*,
+# xenium_cellpose*.
+patch_width_microns: -1
+prior_shapes_key: auto
+use_proseg: true
+min_transcripts: 10
+aggregate_channels: true

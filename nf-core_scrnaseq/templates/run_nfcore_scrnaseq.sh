@@ -9,9 +9,9 @@
 set -e
 set -o pipefail
 
-# parameters
-exec=/nfsdata/bin/nextflow-25.04.7-dist
-main=/nfsdata/scripts/nf-core/nf-core-scrnaseq_4.2.0/4_2_0/main.nf   # confirm path on cluster
+# parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
+exec=NEXTFLOW_EXEC
+main=PIPELINE_MAIN_NF
 
 # CREATE AND CHANGE PATH TO SAMPLESHEET
 samplesheet=/nfsdata/${USER}/PATH_TO_SAMPLE_SHEET

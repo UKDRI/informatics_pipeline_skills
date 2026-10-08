@@ -10,9 +10,9 @@
 set -e
 set -o pipefail
 
-# parameters
-exec=/nfsdata/bin/nextflow-25.04.7-dist
-main=/nfsdata/scripts/nf-core/dev/scdownstream/main.nf
+# parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
+exec=NEXTFLOW_EXEC
+main=PIPELINE_MAIN_NF
 
 # CHANGE INPUT FOLDER AND CREATE samplesheet
 samplesheet=/data/${USER}/PROJECT_NAME/scdownstream/samplesheet_scdownstream.csv

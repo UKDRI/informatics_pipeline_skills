@@ -1,0 +1,15 @@
+# params_macsima.yml — overlay for --technology macsima (Miltenyi MACSima)
+# Upstream preset ../assets/predefined/macsima_base.config (Cellpose on the DAPI channel).
+patch_width_pixel: 3000
+patch_overlap_pixel: 40
+use_cellpose: true
+cellpose_diameter: 35
+cellpose_channels: DAPI
+flow_threshold: 2
+cellprob_threshold: -6
+min_area_pixels2: 400
+min_intensity_ratio: 0.1
+aggregate_channels: true
+# quoted: the pinned schema types expand_radius_ratio as a string (the preset writes 0.1)
+expand_radius_ratio: '0.1'
+pixel_size: 0.17

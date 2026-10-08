@@ -18,8 +18,9 @@ genes and multi-sample integration). This skill only produces files. The generat
 the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sbatch`.
 
 **Dev pipeline.** spatialvi is tracked on the `dev` branch (version `1.0dev`, commit `d0fd35d`).
-The template pins `main=/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a dev build, not a
-release tag; confirm the exact path on the cluster before submitting.
+The job script's `main=` is filled from `<repo-root>/assets/cluster.json`:
+`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a dev build, not a release tag; confirm the exact
+path on the cluster before submitting.
 
 ## 2. Required inputs
 - **`samplesheet.csv`** — prepared beforehand. Its columns are derived from the pipeline's

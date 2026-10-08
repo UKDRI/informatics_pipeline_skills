@@ -1,0 +1,9 @@
+# params_visium_hd.yml — overlay for --technology visium_hd (10x Visium HD)
+# Upstream preset ../assets/predefined/visium_hd_proseg.config: Proseg with the 10x (Space
+# Ranger) segmentation as its prior. Other presets: visium_hd_stardist, visium_hd_stardist_proseg.
+# Visium HD also runs Space Ranger: set spaceranger_probeset (official 10x probe set CSV), and
+# spaceranger_reference if the GRCh38 auto-download default does not fit (SKILL.md).
+use_proseg: true
+visium_hd_prior_shapes_key: auto
+min_transcripts: 10
+aggregate_channels: true

@@ -1,0 +1,17 @@
+# params_phenocycler.yml — overlay for --technology phenocycler (Akoya PhenoCycler / CODEX)
+# Upstream preset ../assets/predefined/phenocycler_base_20X.config (Cellpose, 20X images).
+# For 10X or 40X acquisitions use the values of phenocycler_base_10X / _40X instead
+# (patch size, cellpose_diameter and min_area_pixels2 scale with the magnification).
+patch_width_pixel: 3000
+patch_overlap_pixel: 40
+use_cellpose: true
+cellpose_diameter: 12
+cellpose_channels: DAPI
+flow_threshold: 2
+cellprob_threshold: -6
+min_area_pixels2: 38
+min_intensity_ratio: 0.1
+aggregate_channels: true
+# quoted: the pinned schema types expand_radius_ratio as a string (the preset writes 0.1)
+expand_radius_ratio: '0.1'
+pixel_size: 0.5

@@ -5,7 +5,7 @@ description: >-
   cluster, submit them with sbatch, check job status and pipeline progress, cancel a job, download
   results back (max 2 GB, big files excluded), and remove intermediate files. Use after a pipeline
   skill (nf-core_rnaseq, nf-core_scrnaseq, nf-core_scdownstream, nf-core_differentialabundance,
-  nf-core_spatialvi, bigbio_quantmsdiann) has generated a run_*.sh + params.yml — triggers:
+  nf-core_spatialvi, nf-core_sopa, bigbio_quantmsdiann) has generated a run_*.sh + params.yml — triggers:
   "submit", "sbatch", "run the pipeline on the cluster", "job status", "squeue", "sacct",
   "scontrol", "scancel", "cancel job", "chain jobs", "job dependency", "afterok", "dependency",
   "run pipelines in sequence", "after the download finishes", "transfer to HPC", "rsync to cluster",
@@ -306,7 +306,8 @@ Only these are removable, matched on the final path component:
 - **Name the cost when it matters:** `out`/`outs` are results, not scratch;
   `<name>_qc_clustering.h5ad` / `<name>_downstream.h5ad` are the `--base_adata` inputs of
   scdownstream's `downstream` / `differential_genes` entries (re-making one means re-running the stage
-  that wrote it); `.raw`/`.d`/`fastq`/`sra` data must be
+  that wrote it); a sopa `{sample}.zarr` is that run's main result (the SpatialData object with the
+  segmentation), not scratch; `.raw`/`.d`/`fastq`/`sra` data must be
   re-downloaded before a run can be repeated.
 - To clear several files of one kind, list them first, show the user, then remove them **one explicit
   path at a time**. Never a glob.

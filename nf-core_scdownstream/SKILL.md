@@ -218,8 +218,9 @@ be the replicate.
 ## 7. Fill the SLURM template
 `build_job.py` also writes the filled job script into `--dest`: the input-path line
 (`samplesheet=` for `qc_clustering`, `h5adf=` for the other two) and the `resdir=` line are set from
-`--input`/`--resdir`. All three pin the dev `main.nf` (`/nfsdata/scripts/nf-core/dev/scdownstream/main.nf`),
-place `-entry <name>` first and reference `params_<entry>.yml`. `qc_clustering` and `downstream` use
+`--input`/`--resdir`, and `exec=`/`main=` from `<repo-root>/assets/cluster.json` (the dev `main.nf`,
+`/nfsdata/scripts/nf-core/dev/scdownstream/main.nf`). All three place `-entry <name>` first and
+reference `params_<entry>.yml`. `qc_clustering` and `downstream` use
 `-profile apptainer,gpu`; `differential_genes` uses `-profile apptainer` (none of its processes use a
 GPU). Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run.
 

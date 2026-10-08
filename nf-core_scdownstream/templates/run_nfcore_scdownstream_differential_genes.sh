@@ -10,9 +10,9 @@
 set -e
 set -o pipefail
 
-# parameters
-exec=/nfsdata/bin/nextflow-25.04.7-dist
-main=/nfsdata/scripts/nf-core/dev/scdownstream/main.nf
+# parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
+exec=NEXTFLOW_EXEC
+main=PIPELINE_MAIN_NF
 
 # CHANGE INPUT_H5AD ANNDATA FILE: the downstream stage's <outdir>/<NAME>_downstream.h5ad, where
 # NAME is that stage's `name` param (scdownstream when it was not set). It must hold a `counts`

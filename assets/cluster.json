@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Where the pipelines are installed on the UKDRI cluster. Every skill's scripts/build_job.py",
+    "fills the exec= and main= lines of its job script from here (DESIGN.md 2, 4.2), so pointing",
+    "the jobs at another Nextflow or a new pipeline checkout is an edit to this file only.",
+    "",
+    "nextflow                -> command to run Nextflow. This can simply be 'nextflow' if it is",
+    "                           installed properly in the environment, or a path to an executable",
+    "                           binary. One command for every pipeline.",
+    "pipelines.<id>.main     -> the pipeline's main.nf on the cluster, keyed by each skill's",
+    "                           CONFIG['pipeline_id']. Pinned to the version the skill's assets/",
+    "                           were taken from (DESIGN.md 5): bump both together.",
+    "pipelines.<id>.note     -> optional; appended to the main= line as a '# <note>' comment.",
+    "",
+    "A missing or malformed file, or a pipeline with no entry here, is a hard error in build_job.py,",
+    "never a silent fallback to some other path."
+  ],
+  "nextflow": "nextflow",
+  "pipelines": {
+    "nf-core:rnaseq": {
+      "main": "/nfsdata/scripts/nf-core/nf-core-rnaseq_3.26.0/3_26_0/main.nf"
+    },
+    "nf-core:scrnaseq": {
+      "main": "/nfsdata/scripts/nf-core/nf-core-scrnaseq_4.2.0/4_2_0/main.nf",
+      "note": "confirm path on cluster"
+    },
+    "nf-core:differentialabundance": {
+      "main": "/nfsdata/scripts/nf-core/dev/differentialabundance/main.nf"
+    },
+    "bigbio:quantmsdiann": {
+      "main": "/nfsdata/scripts/bigbio/quantmsdiann_2.2.0/main.nf",
+      "note": "confirm path on cluster"
+    },
+    "nf-core:spatialvi": {
+      "main": "/nfsdata/scripts/nf-core/dev/spatialvi/main.nf"
+    },
+    "nf-core:scdownstream": {
+      "main": "/nfsdata/scripts/nf-core/dev/scdownstream/main.nf"
+    },
+    "nf-core:sopa": {
+      "main": "/nfsdata/scripts/nf-core/nf-core-sopa_1.0.1/1_0_1/main.nf",
+      "note": "confirm path on cluster"
+    }
+  }
+}

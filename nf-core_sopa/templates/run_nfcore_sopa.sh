@@ -1,35 +1,28 @@
 #!/bin/bash
 #
-#SBATCH --job-name=nf-core:scdownstream        # Job name
+#SBATCH --job-name=nf-core:sopa         # Job name
 #SBATCH --partition=htc    # Partition or queue name
 #SBATCH --nodes=1                     # Number of nodes
 #SBATCH --ntasks-per-node=1           # Number of tasks per node
 #SBATCH --cpus-per-task=1             # Number of CPU cores per task
 #SBATCH --time=72:00:00                # Maximum runtime (D-HH:MM:SS)
-#SBATCH --mail-type=END               # Send email at job completion
 set -e
 set -o pipefail
 
 # parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
 exec=NEXTFLOW_EXEC
+# release 1.0.1 — needs Nextflow >= 25.10.4
 main=PIPELINE_MAIN_NF
 
-# CHANGE INPUT_H5AD ANNDATA FILE: the qc_clustering stage's <outdir>/<NAME>_qc_clustering.h5ad,
-# where NAME is that stage's `name` param (scdownstream when it was not set)
-h5adf=/data/${USER}/PROJECT_NAME/scdownstream/qc_clustering/out/NAME_qc_clustering.h5ad
-# CHANGE RESULTS_FOLDER
-resdir=/data/${USER}/PROJECT_NAME/scdownstream/downstream
+# CREATE AND CHANGE PATH TO SAMPLESHEET
+samplesheet=/nfsdata/${USER}/PATH_TO_SAMPLE_SHEET
+# CHANGE RESULTS_DIR on your folder on /data
+resdir=/data/${USER}/RESULTS_DIR
 outdir=$resdir/out
 
 # OPTIONAL custom process-resource config (see DESIGN.md §4.6):
 # point this at a config file and uncomment the '-c $conf' line in the run command below.
 conf=CONFIG
-
-# export environment variables
-# singularity
-export NXF_SINGULARITY_CACHEDIR=/nfsdata/apptainer
-export NXF_APPTAINER_CACHEDIR=/nfsdata/apptainer
-
 
 if [ ! -d $resdir ]
 then
@@ -43,19 +36,24 @@ then
         echo "Created '$outdir'."
 fi
 
+# export environment variables
+# singularity
+export NXF_SINGULARITY_CACHEDIR=/nfsdata/apptainer
+export NXF_APPTAINER_CACHEDIR=/nfsdata/apptainer
+
 echo "Running nextflow..."
-# All non-default pipeline parameters (name, species, selected_clustering,
-# celltypist_model) are set in params_downstream.yml
+# All non-default pipeline parameters (technology, segmentation method, patches, filters, ...)
+# are set in params.yml
 $exec run $main \
-   -entry downstream \
-   -profile apptainer,gpu \
-   --base_adata $h5adf \
+   -profile apptainer \
+   --input $samplesheet \
    --outdir $outdir \
-   -params-file params_downstream.yml \
+   -params-file params.yml \
    -with-report $resdir/nextflow_report.html \
    -resume
 #  -c $conf \        # OPTIONAL: process-resource overrides (see DESIGN.md §4.6)
 echo "Done."
+
 
 echo "Finalizing..."
 

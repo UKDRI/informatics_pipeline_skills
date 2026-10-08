@@ -9,9 +9,9 @@
 set -e
 set -o pipefail
 
-# parameters
-exec=/nfsdata/bin/nextflow-25.04.7-dist
-main=/nfsdata/scripts/bigbio/quantmsdiann_2.2.0/main.nf   # confirm path on cluster
+# parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
+exec=NEXTFLOW_EXEC
+main=PIPELINE_MAIN_NF
 
 # CREATE AND CHANGE PATH TO SDRF SAMPLE SHEET (must end with .sdrf.tsv)
 sdrf=/nfsdata/${USER}/PATH_TO_SAMPLE_SHEET

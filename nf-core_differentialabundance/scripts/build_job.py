@@ -106,6 +106,37 @@ def load_genomes() -> tuple:
     return genomes, {str(k).strip().lower(): v for k, v in aliases.items()}
 
 
+def load_cluster() -> tuple:
+    """Return (nextflow command, main.nf line value) for this pipeline from the shared
+    <repo-root>/assets/cluster.json.
+
+    The job script's exec= and main= lines are cluster data, not template text, so a new
+    Nextflow or a moved checkout is an edit to that file alone (DESIGN.md §2, §4.2). Fails
+    closed: a missing/malformed file or a pipeline without an entry stops the build rather
+    than writing a job script that points at some other install.
+    """
+    path = os.path.join(SHARED_ASSETS_DIR, "cluster.json")
+    if not os.path.isfile(path):
+        die(f"missing cluster map: {path}\n"
+            f"       it belongs at the repo root, alongside the skill folders (DESIGN.md §2)")
+    try:
+        data = json.load(open(path))
+    except ValueError as exc:
+        die(f"{path} is not valid JSON: {exc}")
+    nextflow = data.get("nextflow") if isinstance(data, dict) else None
+    if not isinstance(nextflow, str) or not nextflow.strip():
+        die(f"{path}: 'nextflow' must be the command to run Nextflow ('nextflow' or a path "
+            f"to the binary)")
+    entry = (data.get("pipelines") or {}).get(CONFIG["pipeline_id"])
+    if not isinstance(entry, dict):
+        die(f"{path}: no 'pipelines' entry for {CONFIG['pipeline_id']}")
+    main_nf = entry.get("main")
+    if not isinstance(main_nf, str) or not main_nf.startswith("/"):
+        die(f"{path}: pipelines.{CONFIG['pipeline_id']}.main must be an absolute path to main.nf")
+    note = entry.get("note")
+    return nextflow.strip(), main_nf + (f"   # {note}" if note else "")
+
+
 def detect_species(path, aliases: dict):
     """Infer a genomes.json species key from a metadata/samplesheet TSV or CSV.
 
@@ -385,14 +416,18 @@ def resolve_variant(args, overrides: dict, variants: dict):
 
     Precedence: the dedicated flag (--study-type) -> --set study_type=... -> the
     nextflow.config default. Giving both spellings with different values is an error.
+    With "required": True in the variants block there is no default fallback: the value
+    must be given, so a forgotten flag cannot silently run as the pipeline's default.
     """
     param = variants["param"]
+    flag = f"--{param.replace('_', '-')}"
     flagged = getattr(args, "variant", None)
     from_set = overrides.get(param)
     if flagged and from_set is not None and str(from_set) != str(flagged):
-        die(f"--{param.replace('_', '-')}={flagged} conflicts with --set {param}={from_set}; "
-            f"give only one")
+        die(f"{flag}={flagged} conflicts with --set {param}={from_set}; give only one")
     value = flagged or from_set
+    if value is None and variants.get("required"):
+        die(f"{flag} is required for this pipeline (no default is assumed)")
     if value is None:
         value = config_defaults().get(param)
     return str(value) if value is not None else None
@@ -447,7 +482,8 @@ def main() -> None:
                                            "also passed to the pipeline")
     ap.add_argument("--input", required=True, help="path to the required input (samplesheet / h5ad / SDRF)")
     ap.add_argument("--resdir", required=True, help="results directory")
-    ap.add_argument("--main", help="override the pinned main.nf path in the SLURM template")
+    ap.add_argument("--main", help="override the main.nf path from assets/cluster.json in the "
+                                   "SLURM template")
     ap.add_argument("--set", dest="sets", action="append", default=[],
                     help="override/add a param: key=value (repeatable)")
     ap.add_argument("--resource", dest="resources", action="append", default=[],
@@ -525,11 +561,12 @@ def main() -> None:
     params_out = os.path.join(args.dest, spec["params_file"])
     write_params(params, params_out)
 
-    # fill the SLURM template (rewrite the input-path, resdir, and optional main.nf lines)
+    # fill the SLURM template: the Nextflow command and main.nf from <repo-root>/assets/
+    # cluster.json (--main overrides the latter), then the input-path and resdir lines
     script_out = os.path.join(args.dest, spec["template"])
-    subs = {spec["input_var"]: args.input, "resdir": args.resdir}
-    if getattr(args, "main", None):
-        subs["main"] = args.main
+    nextflow_cmd, main_nf = load_cluster()
+    subs = {"exec": nextflow_cmd, "main": getattr(args, "main", None) or main_nf,
+            spec["input_var"]: args.input, "resdir": args.resdir}
     fill_template(spec["template"], script_out, subs)
 
     # optional custom.config
