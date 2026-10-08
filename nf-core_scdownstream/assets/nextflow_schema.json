@@ -23,6 +23,22 @@
                     "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/scdownstream/usage#samplesheet-input).",
                     "fa_icon": "fas fa-file-csv"
                 },
+                "metadata": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "mimetype": "text/tab-separated-values",
+                    "pattern": "^\\S+\\.(tsv|txt)$",
+                    "description": "Path to a tab-separated file with per-sample metadata to add to the cells' obs.",
+                    "help_text": "Tab-separated file with a header row and one row per sample. The column named by `--metadata_sample_col` holds the `sample` ids from the samplesheet; every other column is added to the `obs` table of that sample's cells. A metadata column that already exists in `obs` is an error. Only used by `-entry qc_clustering`.",
+                    "fa_icon": "fas fa-table"
+                },
+                "metadata_sample_col": {
+                    "type": "string",
+                    "default": "sample",
+                    "description": "Column in the `--metadata` file that holds the samplesheet sample ids.",
+                    "fa_icon": "fas fa-columns"
+                },
                 "outdir": {
                     "type": "string",
                     "format": "directory-path",
@@ -95,9 +111,10 @@
                 },
                 "ambient_correction": {
                     "type": "string",
-                    "default": "decontx",
+                    "default": "none",
                     "enum": ["none", "decontx", "cellbender", "soupx", "scar"],
-                    "description": "Specify the tool to use for ambient RNA correction. If 'none' is selected, no ambient RNA correction will be performed. If you want to use ambient RNA correction only for a subset of datasets, you can use the 'ambient_correction' column in the sample sheet. By default, the ambient-corrected counts will NOT be used for integration, but only stored as an additional layer in the final AnnData object because of the findings in [this publication](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-023-02978-x). If you want to use the ambient-corrected counts for integration, set `ambient_corrected_integration` to true in the sample sheet."
+                    "description": "Tool to use for ambient RNA correction. The default 'none' performs no ambient RNA correction.",
+                    "help_text": "The default is 'none' because the expected input, nf-core/scrnaseq output processed with CellBender, is already corrected for ambient RNA. For input that was not corrected upstream, choose 'decontx', 'soupx', 'cellbender' or 'scar'. When a method is set, the per-sample 'ambient_correction' column in the samplesheet can only switch correction off for individual samples. By default, the ambient-corrected counts are NOT used for integration but only stored as an additional layer (`ambient_corrected_<method>`) in the final AnnData object, because of the findings in [this publication](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-023-02978-x). To use the ambient-corrected counts for integration, set `--ambient_corrected_integration` or the `ambient_corrected_integration` column in the samplesheet."
                 },
                 "ambient_corrected_integration": {
                     "type": "boolean",
@@ -115,60 +132,72 @@
                 "doublet_detection_threshold": {
                     "type": "integer",
                     "default": 1,
-                    "description": "Number of tools that need to agree on a doublet for it to be called as such"
+                    "description": "Number of tools that need to agree on a doublet for it to be called as such. Used with `--doublet_removal`.",
+                    "help_text": "With `--doublet_removal`, a cell is removed if at least this many of the methods in `--doublet_detection` call it a doublet (default 1: any method). Without `--doublet_removal`, no cells are removed and this value has no effect."
+                },
+                "doublet_removal": {
+                    "type": "boolean",
+                    "description": "Remove cells called doublets by at least --doublet_detection_threshold methods, right after doublet detection.",
+                    "help_text": "By default, no cells are removed and doublets are only annotated: `predicted_doublet` in obs holds the scrublet call (if scrublet is among the `--doublet_detection` methods). With this option, cells called doublets by at least `--doublet_detection_threshold` of the methods in `--doublet_detection` are removed right after doublet detection, before ambient correction and QC filtering. This is independent of `--filtering_keep_outliers`, which only affects the QC thresholds."
                 },
                 "cellbender_epochs": {
                     "type": "integer",
                     "default": 150,
                     "description": "Number of epochs to train the CellBender model"
                 },
-                "automatic_cell_filtering":{
+                "automatic_cell_filtering": {
                     "type": "boolean",
                     "default": false,
                     "description": "Perform automatic filtering of cells based.",
                     "help_text": "automatic_cell_filtering must be a boolean."
                 },
-                "min_cells":{
+                "filtering_keep_outliers": {
+                    "type": "boolean",
+                    "description": "Keep cells that fail the QC thresholds and mark them in obs['outlier'] instead of removing them.",
+                    "help_text": "Works with both the fixed thresholds (`--min_genes`, `--max_genes`, `--min_counts`, `--max_counts`, `--max_mito_percentage`) and the automatic thresholds (`--automatic_cell_filtering`). The marked cells stay in the data and go through integration, clustering and the reports, so they can be inspected (e.g. on the UMAP) before deciding to remove them. Gene filtering (`--min_cells`, `--min_counts_gene`) is unchanged.",
+                    "fa_icon": "fas fa-flag"
+                },
+                "min_cells": {
                     "type": "integer",
                     "default": 5,
                     "minimum": 0,
                     "description": "Required minimum number of cells that express gene.",
                     "help_text": "Genes that are expressed in less cells are removed."
                 },
-                "min_counts_gene":{
+                "min_counts_gene": {
                     "type": "integer",
                     "default": 0,
                     "minimum": 0,
                     "description": "Required minimum number of counts for a gene.",
                     "help_text": "Genes with less counts are removed."
                 },
-                "min_genes":{
+                "min_genes": {
                     "type": "integer",
                     "default": 200,
                     "minimum": 0,
                     "description": "Required minimum number of genes that are expressed in cell.",
                     "help_text": "Cells with less expressed genes are removed."
                 },
-                "max_genes":{
+                "max_genes": {
                     "type": ["integer", "boolean"],
                     "default": false,
                     "description": "Maximum number of genes that are expressed in cell.",
                     "help_text": "Cells with more expressed genes are removed. Use 'false' to not filter by maximum number of genes."
                 },
-                "min_counts":{
+                "min_counts": {
                     "type": "integer",
                     "default": 0,
                     "minimum": 0,
                     "description": "Required minimum number of counts per cell.",
                     "help_text": "Cells with less expressed counts are removed."
                 },
-                "max_counts":{
+                "max_counts": {
                     "type": ["integer", "boolean"],
                     "default": false,
                     "description": "Maximum number of counts per cell.",
                     "help_text": "Cells with more counts are removed. Use 'false' to not filter by maximum counts."
                 },
-                "max_mito_percentage":{
+                "max_mito_percentage": {
                     "type": "number",
                     "default": 25,
                     "minimum": 0,
@@ -180,7 +209,7 @@
                     "type": "string",
                     "default": "index",
                     "description": "Gene symbol column used for filtering.",
-                    "help_text":  "This is usually the 'index' of the anndata object."
+                    "help_text": "This is usually the 'index' of the anndata object."
                 }
             }
         },
@@ -232,11 +261,24 @@
             "title": "Processing options",
             "type": "object",
             "properties": {
-                    "n_hvgs": {
+                "n_hvgs": {
                     "type": "integer",
                     "default": 3000,
                     "description": "Number of highly variable genes to use for data processing. If set to 0, the number of highly variable genes will be automatically determined. If set to a negative number, all genes will be used.",
                     "help_text": "This is the number of HVGs for single sample processing and after data integration."
+                },
+                "pca_n_comps": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 2,
+                    "description": "Number of principal components computed (stored in `X_pca`).",
+                    "help_text": "The PCA neighbour graph uses the first `--neighbors_n_pcs` of these components. Only set this higher if the elbow plot in the QC/clustering report suggests that more than 50 components are informative."
+                },
+                "neighbors_n_pcs": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "description": "Number of principal components used to build the PCA neighbour graph (and the PCA UMAP). Default: all computed PCs.",
+                    "help_text": "Must not exceed `--pca_n_comps`. Look at the elbow plot in the QC/clustering report, then rerun `-entry qc_clustering` with this option and `-resume`; the scVI integration is reused from the cache. This does not affect the scVI graph or the default clustering (which uses the scVI graph) unless `--cluster_neighbors neighbors_pca` is set."
                 }
             }
         },
@@ -311,7 +353,7 @@
                 },
                 "species": {
                     "type": "string",
-                    "default": "mouse",
+                    "default": "human",
                     "enum": ["human", "mouse"],
                     "description": "Specify species for downstream analysis",
                     "help_text": "Species for gene set enrichment and ligand-receptor interactions analysis."
@@ -322,6 +364,25 @@
                     "minimum": 1,
                     "description": "Table row limit for downstream analysis report.",
                     "help_text": "The top N entries will be displayed in the report to avoid overly large or slow HTML files."
+                },
+                "umap_for_plots": {
+                    "type": "string",
+                    "default": "X_umap_scvi",
+                    "pattern": "^X_[A-Za-z0-9_]+$",
+                    "description": "UMAP (key in adata.obsm) used for the default plots in the QC/clustering and analysis reports.",
+                    "help_text": "`X_umap_scvi` (default) is the UMAP on the scVI neighbour graph, the graph clustering uses. `X_umap_pca` is the UMAP on the PCA neighbour graph. `X_umap` holds a copy of `X_umap_pca` only because tools such as `sc.pl.umap` expect that key; on its own the name does not say what the UMAP is based on. The other UMAP is shown as a comparison. If the key is missing from the object, the report falls back to `X_umap_scvi`, then `X_umap_pca`, then `X_umap`, and says so."
+                },
+                "umap_color_by": {
+                    "type": "string",
+                    "description": "Comma-separated obs columns to plot on the UMAPs in the QC/clustering and analysis reports, e.g. `sex,diagnosis`.",
+                    "help_text": "Each column is plotted on every UMAP listed in `--umap_color_by_embeddings`. Columns missing from the object are listed in the report and skipped. Columns added with `--metadata` can be used. Applies to the reports of `-entry qc_clustering` and `-entry downstream`."
+                },
+                "umap_color_by_embeddings": {
+                    "type": "string",
+                    "default": "X_umap_pca,X_umap_scvi",
+                    "pattern": "^X_[A-Za-z0-9_]+(,X_[A-Za-z0-9_]+)*$",
+                    "description": "Comma-separated UMAPs (keys in adata.obsm) on which the `--umap_color_by` columns are plotted.",
+                    "help_text": "`X_umap_pca` is the UMAP before integration (PCA neighbour graph); `X_umap_scvi` is the UMAP after integration (scVI neighbour graph). The report shows one block per UMAP. Keys missing from the object are skipped with a note."
                 }
             }
         },
@@ -402,9 +463,9 @@
             "properties": {
                 "ortholog_hcop_directory": {
                     "type": "string",
-                    "default": "/nfsdata/genome/hcop/",
-                    "description": "Specify direcory path to HCOP ortholog files.",
-                    "help_text": "Files are assumed to be gzipped and follow the HCOP file naming conventions."
+                    "format": "directory-path",
+                    "description": "Directory holding the HCOP ortholog tables. Required for LIANA+ when `--species` is not human.",
+                    "help_text": "LIANA+ reads `<directory>/human_<species>_hcop_fifteen_column.txt.gz` (e.g. `human_mouse_hcop_fifteen_column.txt.gz`) to map its human ligand-receptor resource onto non-human data. Download the fifteen-column files from https://www.genenames.org/download/hcop/tsv/ (they are served from https://storage.googleapis.com/public-download-files/hcop/). Not needed for human data."
                 }
             }
         },
@@ -547,6 +608,56 @@
                     "type": "integer",
                     "description": "Minimum number of cells for pseudobulking",
                     "default": 5
+                }
+            }
+        },
+        "differential_genes_options": {
+            "title": "Differential genes options",
+            "type": "object",
+            "fa_icon": "fas fa-balance-scale",
+            "description": "Options for pseudobulk differential gene expression analysis.",
+            "properties": {
+                "diffgenes_contrasts": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "schema": "assets/schema_contrasts.json",
+                    "mimetype": "text/tsv",
+                    "pattern": "^\\S+\\.tsv$",
+                    "description": "Path to the TSV file describing the contrasts to test",
+                    "help_text": "Tab-separated file following the nf-core/differentialabundance contrasts definition. Required columns are `id`, `variable`, `reference` and `target`; the optional columns are `blocking`, `exclude_samples_col` and `exclude_samples_values`. Because the file is tab-separated, `blocking` and `exclude_samples_values` take **comma**-separated values (nf-core/differentialabundance uses semicolons there; this pipeline requires TSV and commas). One differential expression test is run per row, for every instance of the group label. See `assets/contrasts.tsv` for an example.",
+                    "fa_icon": "fas fa-file-csv"
+                },
+                "diffgenes_group_col": {
+                    "type": "string",
+                    "description": "Obs column holding the group label to test within",
+                    "help_text": "Name of the obs column that holds the cluster or cell type label. Differential genes are computed separately for every instance of this label. The column must exist in the obs table of the input AnnData object."
+                },
+                "diffgenes_sample_col": {
+                    "type": "string",
+                    "description": "Obs column identifying the biological sample",
+                    "help_text": "Name of the obs column that identifies the biological sample or replicate. Counts are summed per sample within each combination of the group label and the contrast variables to form the pseudobulk profiles."
+                },
+                "diffgenes_min_counts": {
+                    "type": "integer",
+                    "default": 1000,
+                    "minimum": 0,
+                    "description": "Minimum number of counts per pseudobulk sample",
+                    "help_text": "Pseudobulk samples with fewer total counts are discarded before the differential expression test."
+                },
+                "diffgenes_min_cells": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 0,
+                    "description": "Minimum number of cells per pseudobulk sample",
+                    "help_text": "Pseudobulk samples aggregated from fewer cells are discarded before the differential expression test."
+                },
+                "diffgenes_min_samples": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 2,
+                    "description": "Minimum number of pseudobulk samples per side of a contrast",
+                    "help_text": "The threshold applies to each side of the contrast independently: both the target level and the reference level must be backed by at least this many pseudobulk samples. It is evaluated after the object has been split per instance of the group label, so a group label with too few samples on either side is skipped and produces no results table, rather than failing the run. Values below 2 are rejected because a contrast with a single sample on one side cannot be tested at all."
                 }
             }
         },
@@ -732,6 +843,9 @@
         },
         {
             "$ref": "#/$defs/pseudobulking_options"
+        },
+        {
+            "$ref": "#/$defs/differential_genes_options"
         },
         {
             "$ref": "#/$defs/institutional_config_options"

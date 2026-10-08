@@ -200,11 +200,13 @@ def check_value_list(key: str, value: str, list_file: str) -> None:
              f"if this is a custom model, give a file path instead.")
 
 
-def check_sheets(params: dict, sheet_checks: dict) -> None:
+def check_sheets(params: dict, sheet_checks: dict, context: dict) -> None:
     """Validate secondary input sheets declared in CONFIG["sheet_checks"].
 
-    {param: (module in this scripts/ dir, callable(path) -> (errors, warnings))}, e.g.
-    differentialabundance's contrasts sheet. Structural problems are a HARD error —
+    {param: (module in this scripts/ dir, callable(path, context) -> (errors, warnings))},
+    e.g. differentialabundance's contrasts sheet. `context` is {"params", "input",
+    "metadata"} — the resolved params plus the --input / --metadata paths — so a sheet can
+    be cross-checked against the samplesheet or the metadata it refers to. Structural problems are a HARD error —
     unlike the advisory check_value_list above — because a bad sheet either breaks the
     run or, worse, completes into output paths nobody can use (DESIGN.md §6, §7). Runs
     before anything is written, so params.yml is never produced for a bad sheet. A path
@@ -229,7 +231,7 @@ def check_sheets(params: dict, sheet_checks: dict) -> None:
         except (ImportError, AttributeError) as exc:
             warn(f"cannot validate '{param}': {module_name}.{func_name} unavailable ({exc})")
             continue
-        errors, warnings = checker(value)
+        errors, warnings = checker(value, context)
         for msg in warnings:
             warn(msg)
         if errors:
@@ -416,7 +418,12 @@ def main() -> None:
     variant_param = variants.get("param")
     # Loaded before the parser so --species / the variant flag can take their choices from them.
     schema = load_schema()
-    genomes, species_aliases = load_genomes() if CONFIG.get("species_map") else ({}, {})
+    # An entry may carry its own species_map (replacing the skill-level one; {} = no species
+    # needed) and a metadata_param (the pipeline param that also receives --metadata).
+    uses_species = bool(CONFIG.get("species_map")) or any(
+        e.get("species_map") for e in entries.values())
+    uses_metadata = uses_species or any(e.get("metadata_param") for e in entries.values())
+    genomes, species_aliases = load_genomes() if uses_species else ({}, {})
 
     ap = argparse.ArgumentParser(description=f"Build a {CONFIG['pipeline_id']} job.")
     if list(entries) != [""]:
@@ -429,12 +436,15 @@ def main() -> None:
                         help=f"{variant_param} for this run; also applies the matching "
                              f"templates/{pattern.format(value='<value>')} overlay of recommended "
                              f"values and any variant-specific species files, when they exist")
-    if CONFIG.get("species_map"):
+    if uses_species:
         ap.add_argument("--species", choices=sorted(genomes),
                         help="fill species-dependent params (genome fasta/gtf, gene sets, or the "
                              "'species' param) from assets/genomes.json; override any with --set")
+    if uses_metadata:
         ap.add_argument("--metadata", help="TSV/CSV (metadata or samplesheet) to infer --species "
-                                           "from a species/organism column when --species is omitted")
+                                           "from a species/organism column when --species is "
+                                           "omitted; for an entry with a metadata_param it is "
+                                           "also passed to the pipeline")
     ap.add_argument("--input", required=True, help="path to the required input (samplesheet / h5ad / SDRF)")
     ap.add_argument("--resdir", required=True, help="results directory")
     ap.add_argument("--main", help="override the pinned main.nf path in the SLURM template")
@@ -462,7 +472,8 @@ def main() -> None:
         recommended_keys |= set(overlay)
         params[variant_param] = variant_value
 
-    species_map = dict(CONFIG.get("species_map", {}))
+    species_map = dict(spec["species_map"] if "species_map" in spec
+                       else CONFIG.get("species_map", {}))
     if variant_value:
         # A variant may remap a param to a different reference key, or map it to None to say
         # this assay does not need that reference at all (dropping the base mapping).
@@ -486,7 +497,10 @@ def main() -> None:
                 die(f"assets/genomes.json: species '{species}' has no '{genome_key}' entry "
                     f"(needed for param '{param_key}')")
             params[param_key] = genomes[species][genome_key]
-    params.update(overrides)  # --set wins over recommended + variant + species
+    metadata_param = spec.get("metadata_param")
+    if metadata_param and getattr(args, "metadata", None):
+        params[metadata_param] = args.metadata
+    params.update(overrides)  # --set wins over recommended + variant + species + --metadata
 
     # A species-dependent param left unset would silently run against the wrong reference.
     unresolved = sorted(k for k in species_map if k not in params)
@@ -495,7 +509,16 @@ def main() -> None:
             f"pass --species {'|'.join(sorted(genomes))}, add a species/organism column to the "
             f"samplesheet, or set them explicitly with --set")
 
-    check_sheets(params, CONFIG.get("sheet_checks"))
+    # Params this entry should normally have: a missing one warns, it never stops the build.
+    for param_key, message in sorted((spec.get("advise") or {}).items()):
+        if params.get(param_key) in (None, ""):
+            warn(f"'{param_key}' is not set — {message}")
+
+    check_sheets(params, CONFIG.get("sheet_checks"), {
+        "params": params,
+        "input": args.input,
+        "metadata": getattr(args, "metadata", None),
+    })
     validate_params(params, schema, CONFIG["value_lists"])
     params = strip_defaults(params, schema)
 
@@ -519,7 +542,7 @@ def main() -> None:
     if variant_value:
         print(f"{variant_param:<9}: {variant_value}" +
               (f"  (overlay: templates/{overlay_file})" if overlay_file else ""))
-    if species:
+    if species and species_map:
         print(f"species  : {species}  ({', '.join(sorted(species_map))})")
     print(f"params   : {params_out}  ({len(params)} non-default value(s))")
     if recommended_keys:

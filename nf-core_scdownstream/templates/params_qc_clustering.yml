@@ -4,9 +4,16 @@
 # `species` is NOT seeded here: it is filled from --species mouse|human, and build_job.py
 # hard-errors if no species can be resolved. Seeding it would silently run human data as
 # mouse whenever --species was forgotten.
+#
+# `metadata` (per-sample TSV) is NOT seeded either: pass it with --metadata FILE, which also
+# lets build_job.py infer the species from an organism column. Without it, build_job.py warns.
+#
+# `name` prefixes the stage output: <outdir>/<name>_qc_clustering.h5ad is the --base_adata of
+# the downstream stage. Use the SAME name in all three stages (--set name=<study>).
 # NOTE: celltypist_model below is MOUSE-specific — change it when running human data.
 name: scdownstream
 celltypist_model: Mouse_Whole_Brain
+# The FIRST resolution is copied to `leiden`, the default clustering.
 clustering_resolutions: "0.1,0.3,0.5,0.7,1.0,1.5,2.0,2.5,3.0"
 automatic_cell_filtering: true
 # NOTE: min_cells / min_genes / min_counts / max_mito_percentage are left at their defaults

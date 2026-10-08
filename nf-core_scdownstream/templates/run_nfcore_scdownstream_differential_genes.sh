@@ -14,11 +14,12 @@ set -o pipefail
 exec=/nfsdata/bin/nextflow-25.04.7-dist
 main=/nfsdata/scripts/nf-core/dev/scdownstream/main.nf
 
-# CHANGE INPUT_H5AD ANNDATA FILE: the qc_clustering stage's <outdir>/<NAME>_qc_clustering.h5ad,
-# where NAME is that stage's `name` param (scdownstream when it was not set)
-h5adf=/data/${USER}/PROJECT_NAME/scdownstream/qc_clustering/out/NAME_qc_clustering.h5ad
+# CHANGE INPUT_H5AD ANNDATA FILE: the downstream stage's <outdir>/<NAME>_downstream.h5ad, where
+# NAME is that stage's `name` param (scdownstream when it was not set). It must hold a `counts`
+# layer of raw counts: pseudobulk aggregation sums that layer.
+h5adf=/data/${USER}/PROJECT_NAME/scdownstream/downstream/out/NAME_downstream.h5ad
 # CHANGE RESULTS_FOLDER
-resdir=/data/${USER}/PROJECT_NAME/scdownstream/downstream
+resdir=/data/${USER}/PROJECT_NAME/scdownstream/differential_genes
 outdir=$resdir/out
 
 # OPTIONAL custom process-resource config (see DESIGN.md §4.6):
@@ -44,14 +45,14 @@ then
 fi
 
 echo "Running nextflow..."
-# All non-default pipeline parameters (name, species, selected_clustering,
-# celltypist_model) are set in params_downstream.yml
+# All non-default pipeline parameters (name, diffgenes_contrasts, diffgenes_group_col,
+# diffgenes_sample_col) are set in params_differential_genes.yml
 $exec run $main \
-   -entry downstream \
-   -profile apptainer,gpu \
+   -entry differential_genes \
+   -profile apptainer \
    --base_adata $h5adf \
    --outdir $outdir \
-   -params-file params_downstream.yml \
+   -params-file params_differential_genes.yml \
    -with-report $resdir/nextflow_report.html \
    -resume
 #  -c $conf \        # OPTIONAL: process-resource overrides (see DESIGN.md §4.6)
