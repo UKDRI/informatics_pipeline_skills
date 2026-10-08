@@ -46,6 +46,14 @@ path and the file ownership are checked), scanned before anything moves, files o
 **2 GB total maximum**, and never started without your go-ahead. For the complete results tree — large
 files included — you get an `rsync` command to run yourself.
 
+**Which folders count as "yours"** is set in `slurm/assets/user_dirs.json`, not in the code:
+`user_dir_prefixes` lists the roots of each user's own directory (`/data/<you>/…`, `/scratch/<you>/…`,
+…). To work together in a shared project folder, add its root to `project_roots` (empty by default).
+A path `<root>/<project>/…` is then allowed only if you are in the group that owns `<root>/<project>`.
+Downloads there may include teammates' files in that group, but a cleanup only ever removes your own
+files. Each project folder should have its own dedicated group with the setgid bit set (see DESIGN.md
+§9.3).
+
 ## Reference files
 
 Genome, gene-annotation, gene-set, and protein-database paths are **not** hard-coded in the skills.
