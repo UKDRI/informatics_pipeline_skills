@@ -143,11 +143,12 @@ def read_contrasts(path: str) -> tuple:
 # --------------------------------------------------------------------------- #
 # Validation (also imported by build_job.py via CONFIG["sheet_checks"])
 # --------------------------------------------------------------------------- #
-def check_file(path: str) -> tuple:
+def check_file(path: str, context: dict | None = None) -> tuple:
     """Validate a contrasts sheet. Returns (errors, warnings) — never raises.
 
     Errors are things that break the run or silently produce the wrong model or
-    unusable output paths; warnings are advisory.
+    unusable output paths; warnings are advisory. `context` is what build_job.py's
+    sheet_checks hook passes (resolved params, --input, --metadata); unused here.
     """
     errors: list = []
     warnings: list = []

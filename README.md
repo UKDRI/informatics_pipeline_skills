@@ -15,7 +15,7 @@ cluster. There are two kinds:
 |---|---|
 | `nf-core_rnaseq` | bulk RNA-seq |
 | `nf-core_scrnaseq` | single-cell RNA-seq |
-| `nf-core_scdownstream` | single-cell downstream analysis *(UKDRI-modified)* |
+| `nf-core_scdownstream` | single-cell downstream analysis — QC/clustering, markers/enrichment, pseudobulk differential genes per contrast *(UKDRI-modified)* |
 | `nf-core_differentialabundance` | differential abundance *(UKDRI-modified)* |
 | `nf-core_spatialvi` | spatial transcriptomics |
 | `bigbio_quantmsdiann` | DIA proteomics (DIA-NN) |
@@ -103,7 +103,7 @@ reference trees are read-only to the skills by design: the `slurm` skill refuses
 - **Custom resource tuning (optional)** — request more CPUs, memory, or wall-time for specific
   processes when a dataset needs it, without changing the pipeline.
 - **Multiple entry points** — pipelines with more than one workflow (e.g. scdownstream's
-  `qc_clustering` → `downstream`) get one job script per entry point.
+  `qc_clustering` → `downstream` → `differential_genes`) get one job script per entry point.
 - **Reproducible references** — each skill pins the exact pipeline version (and commit, for
   in-development pipelines) so generated jobs match what actually runs.
 

@@ -1,10 +1,13 @@
 # params.yml — nf-core:scdownstream (entry: downstream)
 # Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
 #
-# `species` is NOT seeded here: it is filled from --species mouse|human, and build_job.py
-# hard-errors if no species can be resolved. Seeding it would silently run human data as
-# mouse whenever --species was forgotten. For this entry --input is an .h5ad, which cannot
-# be scanned for an organism column, so use --species or --metadata file.tsv.
+# `species` and `ortholog_hcop_directory` are NOT seeded here: both are filled from
+# --species mouse|human (the HCOP ortholog tables LIANA+ needs for non-human data come from
+# <repo-root>/assets/genomes.json). For this entry --input is an .h5ad, which cannot be
+# scanned for an organism column, so use --species or --metadata file.tsv.
+#
+# `name` prefixes the stage output: <outdir>/<name>_downstream.h5ad is the --base_adata of
+# the differential_genes stage. Use the SAME name in all three stages (--set name=<study>).
 # NOTE: celltypist_model below is MOUSE-specific — change it when running human data.
 name: scdownstream
 selected_clustering: leiden_1.0

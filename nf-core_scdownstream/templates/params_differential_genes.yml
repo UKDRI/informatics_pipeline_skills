@@ -1,0 +1,12 @@
+# params.yml — nf-core:scdownstream (entry: differential_genes)
+# Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
+# Pseudobulk (decoupler) + PyDESeq2 per group label and contrast. No species is needed.
+#
+# `name` prefixes the outputs (<name>_<group>_<contrast id>.tsv, the report). Use the SAME
+# name as the two earlier stages (--set name=<study>).
+name: scdownstream
+diffgenes_contrasts: /data/$USER/PROJECT/contrasts.tsv  # TSV: id,variable,reference,target,blocking
+                                                       # blocking is ','-separated. Build it with
+                                                       # scripts/contrasts.py build (SKILL.md §6).
+diffgenes_group_col: leiden_1.0  # obs column to test within: a clustering or a cell-type column
+diffgenes_sample_col: sample     # obs column of the biological sample; the pipeline always adds it

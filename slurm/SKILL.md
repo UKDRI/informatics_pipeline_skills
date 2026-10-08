@@ -109,7 +109,8 @@ python3 scripts/slurm_ops.py transfer --user <username> --host <hostname> \
 ```
 - **What to push:** `run_*.sh`, `params.yml` / `params_<entry>.yml`, `custom.config`,
   `samplesheet.csv`, `contrasts.csv` (plural — the differentialabundance parameter is `contrasts`),
-  the abundance `matrix` TSV, `*.sdrf.tsv` (quantmsdiann), optionally `metadata.tsv`; **and input
+  the abundance `matrix` TSV, `*.sdrf.tsv` (quantmsdiann), scdownstream's `sample_metadata.tsv`
+  (`metadata`) and `contrasts.tsv` (`diffgenes_contrasts`), optionally `metadata.tsv`; **and input
   data**: `fastq`/`fastqs`/`sra` directories, Cell Ranger / Space Ranger `outs` directories, `*.raw` files and
   `*.d/` directories, `*.tar.gz`/`*.zip` archives, `*.rds`/`*.pkl`/`*.h5ad` objects, any `*.csv`/`*.tsv`.
 - **Keep the job script and its params file in the same directory** — the script references
@@ -303,8 +304,9 @@ Only these are removable, matched on the final path component:
   a cleanup (after a download, or after a cancel) is not the same as being told to do it.
 - It prints the target's size and contents, and requires confirmation.
 - **Name the cost when it matters:** `out`/`outs` are results, not scratch;
-  `integrated_scvi_finalized.h5ad` is the `--base_adata` input of scdownstream's `downstream` entry
-  (re-making it means re-running `qc_clustering`); `.raw`/`.d`/`fastq`/`sra` data must be
+  `<name>_qc_clustering.h5ad` / `<name>_downstream.h5ad` are the `--base_adata` inputs of
+  scdownstream's `downstream` / `differential_genes` entries (re-making one means re-running the stage
+  that wrote it); `.raw`/`.d`/`fastq`/`sra` data must be
   re-downloaded before a run can be repeated.
 - To clear several files of one kind, list them first, show the user, then remove them **one explicit
   path at a time**. Never a glob.

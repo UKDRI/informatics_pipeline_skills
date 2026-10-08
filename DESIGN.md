@@ -104,7 +104,10 @@ Rules:
   per-skill choice (§7, `sheet_checks`): a helper validating a sheet exposes
   **`check --<param> <path>`**, and one that can also produce that sheet exposes **`build … --dest`**.
   The first such helper is `nf-core_differentialabundance/scripts/contrasts.py` (`build` | `check` for
-  the contrasts sheet, wired in via `CONFIG["sheet_checks"]`, §7).
+  the contrasts sheet, wired in via `CONFIG["sheet_checks"]`, §7). scdownstream has two:
+  `scripts/contrasts.py` (`build` | `check --diffgenes_contrasts` — its own copy, because that fork's
+  sheet is tab-separated with comma-separated blocking) and `scripts/metadata.py`
+  (`check --metadata` only: the per-sample metadata belongs to the user and is never generated).
 - **Scripts resolve their own directory with `os.path.realpath(__file__)`, not `abspath`.** A skill
   is normally installed as a symlink in `~/.claude/skills` (see README), and only `realpath` follows
   that symlink back into the clone. With `abspath`, `SKILL_DIR`'s parent is `~/.claude/skills`, so the
@@ -368,18 +371,21 @@ modes.
 - Everything else follows §4.5/§5 unchanged: only the allowed flags on the command line, all other
   non-default parameters in that entry's `params_<entry>.yml`.
 
-**Worked example — `nf-core:scdownstream`** has two entry points that run in sequence:
+**Worked example — `nf-core:scdownstream`** has three entry points that run in sequence:
 
-| Entry | Required input | Produces / consumes |
+| Entry | Required input | Produces (in its `$outdir`) |
 |---|---|---|
-| `qc_clustering` | `--input` (samplesheet.csv) | writes `…/out/integrated_scvi_finalized.h5ad` |
-| `downstream` | `--base_adata` (that `.h5ad`) | downstream analysis on the qc_clustering output |
+| `qc_clustering` | `--input` (samplesheet.csv) | `<NAME>_qc_clustering.h5ad` |
+| `downstream` | `--base_adata` (the qc_clustering `.h5ad`) | `<NAME>_downstream.h5ad` |
+| `differential_genes` | `--base_adata` (the downstream `.h5ad`) | per group × contrast DE tables |
 
-So `run_nfcore_scdownstream_qc_clustering.sh` is run first; its output h5ad becomes the
-`--base_adata` input of `run_nfcore_scdownstream_downstream.sh`. Both can be submitted in one sitting,
-the second queued behind the first on an `afterok` dependency (§9.4.7) — the `--base_adata` path is
-known in advance from the first stage's `$outdir`, so nothing has to wait for a human to notice that
-stage one finished.
+`<NAME>` is that stage's `name` param, falling back to `scdownstream` when unset (the fork's
+`conf/modules.config` sets `ext.prefix = "${params.name ?: 'scdownstream'}_<stage>"`). So each stage's
+`--base_adata` is `<previous resdir>/out/<previous name>_<previous entry>.h5ad`, and all three can be
+submitted in one sitting, each queued behind the one before on an `afterok` dependency (§9.4.7) —
+every path is known in advance from `$outdir` and `name`, so nothing has to wait for a human to notice
+that a stage finished. The skill keeps `name` the same across the three stages to make that
+derivation trivial.
 
 ### 4.8 Finalize / cleanup
 
@@ -424,7 +430,7 @@ the bulk input/object files removable and everything else not).
     `aligner ∈ {star_salmon, star_rsem, hisat2, bowtie2_salmon}`);
   - keeps **only non-default values**, where the *effective default* is the `nextflow.config` value
     if the param is set there (what Nextflow actually applies at runtime), otherwise the schema
-    default. Schema and config defaults can diverge (e.g. scdownstream `species`: schema `mouse`,
+    default. Schema and config defaults can diverge (e.g. scdownstream `species` once had schema `mouse`,
     config `human`), so comparing against the config value avoids silently dropping a needed value.
 - **External value lists (advisory).** For a *free-text* value not expressible as a schema enum, a
   pipeline may check it against a stored reference list in `assets/`. Unlike the schema checks above
@@ -650,7 +656,7 @@ reference, and `base.config` (the repo's `conf/base.config`) is the process-reso
 | nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `4c3883c` |
 | bigbio:quantmsdiann | `bigbio/quantmsdiann` @ `main` | 2.2.0 | — (release) |
 | nf-core:spatialvi | `nf-core/spatialvi` @ `dev` | 1.0dev | `d0fd35d` |
-| nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `3009f37` |
+| nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `e101d8c` |
 
 **UKDRI forks** (`differentialabundance`, `scdownstream`) are tracked on their **`dev_ukdri`**
 branch — the repo default; `master` there is stale/not a normal branch and must not be used.
@@ -809,7 +815,17 @@ before it writes `params.yml`.
     else is inferred from a species/organism column in `--metadata` or the `--input` samplesheet
     (scientific names via the file's `species_aliases`, e.g. *Mus musculus* → mouse). Applied after
     §5's precedence order, so an explicit `--set` always wins. A variant may overlay the species map
-    (e.g. a different gene-set file per assay).
+    (e.g. a different gene-set file per assay), and an **entry** may replace it outright with its own
+    `species_map` (`{}` = this entry needs no species; scdownstream's `differential_genes`), so one
+    stage can need a reference another does not (scdownstream's `downstream` adds
+    `ortholog_hcop_directory`).
+  - **An entry may route `--metadata` into a pipeline param** with `"metadata_param": "<param>"`
+    (scdownstream's `qc_clustering` → `metadata`). The same file then also feeds species inference;
+    `--set` still wins. Without the key, `--metadata` stays a local species-inference input only.
+  - **An entry may `advise` params** — `{param: why}`: after all values are resolved, a param still
+    unset prints `WARNING: '<param>' is not set — <why>`. It never stops the build; it is for inputs
+    that are optional to the pipeline but whose absence the user should hear about (scdownstream's
+    per-sample `metadata`).
   - **Never leave a species-mapped param unset** — hard-error per §5.
   - **No hard-coded cluster paths in the script.** Reference file paths are data
     (`<repo-root>/assets/genomes.json`), so adding a species or bumping a release needs no code
@@ -835,15 +851,22 @@ before it writes `params.yml`.
     fills only the input-path, `resdir` and optional `main` lines.
   - Where relevant, validate or derive the `samplesheet.csv`.
   - **Validate a secondary input sheet declared in `CONFIG["sheet_checks"]`** —
-    `{param: (helper module in this scripts/ dir, callable(path) -> (errors, warnings))}`. The check
+    `{param: (helper module in this scripts/ dir, callable(path, context) -> (errors, warnings))}`,
+    where `context` is `{"params": <resolved params>, "input": <--input>, "metadata": <--metadata>}`
+    so a sheet can be cross-checked against the samplesheet or metadata it depends on (a helper that
+    needs none of it accepts and ignores the argument). The check
     runs **before `params.yml` is written**, so a bad sheet never yields a job that is submitted and
     fails later; structural problems are a **hard error** (unlike the warn-only `value_lists` check
     above), because they break the run or, worse, complete into output paths nobody can use. When the
     param's value is not a readable local file — normally a cluster path such as
     `/data/$USER/PROJECT/contrasts.csv` — say so and name the command that checks the local copy;
     never guess at a path or skip silently. Skills with no such sheet omit the key entirely.
-    Currently only `nf-core:differentialabundance` declares one, for its `contrasts` sheet
-    (`scripts/contrasts.py`, §6 "Contrast ids").
+    `nf-core:differentialabundance` declares one for its `contrasts` sheet (`scripts/contrasts.py`,
+    §6 "Contrast ids"); `nf-core:scdownstream` declares `metadata` (`scripts/metadata.py`: the
+    pipeline's ADDMETADATA stop rules, plus every samplesheet sample having a row) and
+    `diffgenes_contrasts` (`scripts/contrasts.py`: TSV, comma blocking, no whitespace, required safe
+    ids, and — given the metadata — reference/target levels that actually occur, since a missing
+    level is skipped silently by the pipeline).
 
     **The helper's CLI shape is part of the contract** (§2). `CONFIG` names the module and the
     validator function, but the note the engine prints for a non-local path is a *runnable command*:
@@ -890,7 +913,7 @@ Folder and file naming for all six pipelines:
 | `nf-core:differentialabundance` | `nf-core_differentialabundance` | `run_nfcore_differentialabundance.sh` |
 | `bigbio:quantmsdiann`           | `bigbio_quantmsdiann`         | `run_bigbio_quantmsdiann.sh`        |
 | `nf-core:spatialvi`             | `nf-core_spatialvi`           | `run_nfcore_spatialvi.sh`           |
-| `nf-core:scdownstream`          | `nf-core_scdownstream`        | `run_nfcore_scdownstream_qc_clustering.sh`, `run_nfcore_scdownstream_downstream.sh` *(two entry points, §4.7)* |
+| `nf-core:scdownstream`          | `nf-core_scdownstream`        | `run_nfcore_scdownstream_qc_clustering.sh`, `run_nfcore_scdownstream_downstream.sh`, `run_nfcore_scdownstream_differential_genes.sh` *(three entry points, §4.7)* |
 
 Rule: folder = pipeline id with `:` → `_`; job script = `run_` + folder name with any remaining
 `-` normalized to `_` (see `run_nfcore_rnaseq.sh`). **Multi-entry pipelines** (§4.7) append the
@@ -907,9 +930,13 @@ nf-core ones. Their `SKILL.md` **must** document the deltas from upstream (renam
 params, custom modules) so `params.yml` is written against the modified interface, not the
 public nf-core docs.
 
-`nf-core:scdownstream` additionally exposes **two entry points** (§4.7): `qc_clustering`
-(samplesheet → `integrated_scvi_finalized.h5ad`) and `downstream` (that h5ad via `--base_adata` →
-downstream analysis). They run in sequence and each has its own job script + `params_<entry>.yml`.
+`nf-core:scdownstream` additionally exposes **three entry points** (§4.7): `qc_clustering`
+(samplesheet → `<NAME>_qc_clustering.h5ad`), `downstream` (that h5ad via `--base_adata` → marker genes,
+enrichment, LIANA+ → `<NAME>_downstream.h5ad`) and `differential_genes` (that h5ad + a contrasts TSV →
+pseudobulk PyDESeq2 per group label × contrast). They run in sequence and each has its own job script
++ `params_<entry>.yml`. Per-sample metadata (`--metadata`, `qc_clustering` only) is what gives
+`differential_genes` its condition/treatment columns: the skill **asks** the user for it, validates
+it, and warns when there is none — it never assembles one itself.
 It also stores `assets/celltypist_models.json` (the CellTypist model list); its `celltypist_model`
 value is checked against that list — accepting a known model name or a custom-model file path,
 warning otherwise — per §7. Its `SKILL.md` carries prose custom-config recommendations (§4.6),
@@ -1119,6 +1146,8 @@ or expect (§3, §5, §6) **and** the input data itself.
 | the **gene lengths TSV** — same features × samples shape (§6) | differentialabundance RNA-seq runs, referenced from `params.yml` as `transcript_length_matrix` |
 | `*.sdrf.tsv` — the SDRF sample table (**not** a CSV samplesheet) | quantmsdiann, its `--input` |
 | `metadata.tsv` | optional; the skills read it *locally* to infer species (§5), so push it only if the user wants it stored beside the run |
+| `sample_metadata.tsv` — per-sample metadata | scdownstream `qc_clustering`, referenced from `params_qc_clustering.yml` as `metadata` — **must** be pushed |
+| `contrasts.tsv` — tab-separated, comma blocking (§8) | scdownstream `differential_genes`, referenced from `params_differential_genes.yml` as `diffgenes_contrasts` |
 
 **Input data.** `transfer` also pushes the data a pipeline entry point consumes — essentially anything
 in the §6 input chain that the user already holds locally:
@@ -1215,8 +1244,9 @@ path** — its directory name, or its file extension:
   instead.
 - **Several allow-listed kinds are also pipeline *inputs*.** "Regenerable" is not "worthless" — name the
   cost in the confirmation prompt:
-  - `integrated_scvi_finalized.h5ad` is the **required `--base_adata` input** of scdownstream's
-    `downstream` entry (§4.7); regenerating it means re-running the entire `qc_clustering` stage.
+  - `<NAME>_qc_clustering.h5ad` / `<NAME>_downstream.h5ad` are the **required `--base_adata`
+    inputs** of scdownstream's `downstream` and `differential_genes` entries (§4.7); regenerating one
+    means re-running the whole stage that wrote it (and every stage before it, if those are gone too).
   - an `outs` directory can be the **`spaceranger_dir` input** of a spatialvi processed-data run, and
     `.h5`/`.h5ad` files are the per-sample inputs listed in a scdownstream samplesheet.
   - `.raw` / `.d` data referenced by a `*.sdrf.tsv`, and `fastq`/`sra` downloads referenced by a
