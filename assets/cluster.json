@@ -15,7 +15,7 @@
     "A missing or malformed file, or a pipeline with no entry here, is a hard error in build_job.py,",
     "never a silent fallback to some other path."
   ],
-  "nextflow": "nextflow",
+  "nextflow": "/nfsdata/bin/nextflow-26.04.4-dist",
   "pipelines": {
     "nf-core:rnaseq": {
       "main": "/nfsdata/scripts/nf-core/nf-core-rnaseq_3.26.0/3_26_0/main.nf"
@@ -32,7 +32,8 @@
       "note": "confirm path on cluster"
     },
     "nf-core:spatialvi": {
-      "main": "/nfsdata/scripts/nf-core/dev/spatialvi/main.nf"
+      "main": "/nfsdata/scripts/nf-core/nf-core-spatialvi_dev/nf-core-spatialvi_dev/dev/main.nf",
+      "note": "dev downloaded 2026-10-13, includes PR #155 (merged normalisation/HVG/PCA before integration); old build in .../nf-core-spatialvi_dev/dev"
     },
     "nf-core:scdownstream": {
       "main": "/nfsdata/scripts/nf-core/dev/scdownstream/main.nf"
