@@ -2,8 +2,9 @@
 # Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
 # Pseudobulk (decoupler) + PyDESeq2 per group label and contrast. No species is needed.
 #
-# `name` prefixes the outputs (<name>_<group>_<contrast id>.tsv, <name>_differential_genes.json.gz,
-# the report). Use the SAME name as the two earlier stages (--set name=<study>).
+# `name` prefixes the outputs (differential_genes/deseq2/<group>/<name>_<group>_<contrast id>.tsv,
+# <name>_differential_genes.json.gz, report/<name>_differential_genes_report.html). Use the SAME
+# name as the two earlier stages (--set name=<study>).
 name: scdownstream
 diffgenes_contrasts: /data/$USER/PROJECT/contrasts.tsv  # TSV: id,variable,reference,target,blocking
                                                        # blocking is ','-separated. Build it with

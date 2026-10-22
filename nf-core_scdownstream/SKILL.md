@@ -53,12 +53,17 @@ and the job script passes `--stage <name>` on the command line — so `stage` is
 |---|---|---|---|
 | 1 | `qc_clustering` | `--input` samplesheet.csv | `<NAME>_qc_clustering.h5ad` (+ `.rds`, QC/clustering report) |
 | 2 | `downstream` | `--base_adata` = stage 1 h5ad | `<NAME>_downstream.h5ad` (+ `.rds`, `<NAME>_downstream_markers.json.gz`, report) |
-| 3 | `differential_genes` | `--base_adata` = stage 2 h5ad, plus `diffgenes_contrasts` | per group × contrast `<NAME>_<group>_<contrast id>.tsv`, `<NAME>_differential_genes.json.gz`, DE report |
+| 3 | `differential_genes` | `--base_adata` = stage 2 h5ad, plus `diffgenes_contrasts` | per group × contrast `differential_genes/deseq2/<group>/<NAME>_<group>_<contrast id>.tsv`, `<NAME>_differential_genes.json.gz`, `report/<NAME>_differential_genes_report.html` |
 
 **`<NAME>` is the `name` param of that stage; unset, it falls back to `scdownstream`** (the fork's
-`conf/modules.config`: `"${params.name ?: 'scdownstream'}_<stage>"`). The stage outputs are
-published to the root of `--outdir`, gzip-compressed, with `X`, every layer and `raw.X` stored as
-sparse CSR.
+`conf/modules.config`: `"${params.name ?: 'scdownstream'}_<stage>"`) — except for the
+`differential_genes` DE tables and report, which fall back to `differential_genes` (`main.nf`),
+while its JSON still falls back to `scdownstream`. The templates seed `name`, so this only matters
+if it is removed. Stages 1 and 2 publish their `.h5ad`/`.rds` to the root of `--outdir`,
+gzip-compressed, with `X`, every layer and `raw.X` stored as sparse CSR. Stage 3 writes its DE
+tables into `differential_genes/deseq2/<group>/` (one folder per `diffgenes_group_col` value) and
+its marker-gene JSON to the root of `--outdir`. Every stage's HTML report is in `report/`; the
+pseudobulk `.h5ad`s are published only with `save_intermediates: true`.
 
 **Deriving the next stage's input — do this, don't guess:**
 
@@ -204,7 +209,7 @@ The shipped `celltypist_model` (`Mouse_Whole_Brain`) is mouse-specific: change i
   set `decontx`/`cellbender`/`soupx`/`scar` only if they are not.
 
 **Marker-gene JSONs** (`downstream` and `differential_genes`). Both write a compact gene-set JSON
-next to the stage `.h5ad`: `<NAME>_downstream_markers.json.gz` (one set per cluster, id
+to the root of `--outdir`: `<NAME>_downstream_markers.json.gz` (one set per cluster, id
 `genes--cluster--<cluster>`) and `<NAME>_differential_genes.json.gz` (per group value × contrast,
 `genes--<contrast id>--<group>--up` / `--down`, ranked by the Wald statistic; empty sets are
 dropped). `differential_genes` filters its sets with `diffgenes_markers_thr_adj_pvalue` (0.05),
@@ -282,7 +287,8 @@ be the replicate.
 **Tell the user** before submitting:
 - A contrast is **skipped silently** for a group value when either side has fewer than
   `diffgenes_min_samples` (2) surviving pseudobulk samples — no error, no file. Check the DE report
-  and `de_manifest.tsv` against the contrasts they expected. The DE report opens with a
+  against the contrasts they expected (the pipeline's `de_manifest.tsv` feeds the report but is not
+  published). The DE report opens with a
   **Contrasts** table (target vs reference, blocking, excluded samples) and a **Significant genes
   overview** per group value × contrast that marks the skipped ones.
 - The design needs biological replicates on both sides; with one sample per condition nothing is
@@ -300,6 +306,11 @@ be the replicate.
 reference `params_<entry>.yml` — never `-entry`, which this fork no longer supports. `qc_clustering` and `downstream` use
 `-profile apptainer,gpu`; `differential_genes` uses `-profile apptainer` (none of its processes use a
 GPU). Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run.
+
+**No GPU on the cluster?** Change `-profile apptainer,gpu` to `-profile apptainer` in the
+`qc_clustering` and `downstream` scripts. The `process_gpu` steps (e.g. scVI) then run on CPU, because
+`base.config` sets `ext.use_gpu`/`accelerator` from `workflow.profile.contains('gpu')`. They are slower,
+so allow more `#SBATCH --time`.
 
 ## 8. Custom-config recommendations
 - **Large datasets (> 250,000 cells):** bump the per-process memory limit to `225.GB` via a custom
