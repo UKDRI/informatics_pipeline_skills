@@ -48,7 +48,7 @@ echo "Running nextflow..."
 # All non-default pipeline parameters (name, diffgenes_contrasts, diffgenes_group_col,
 # diffgenes_sample_col) are set in params_differential_genes.yml
 $exec run $main \
-   -entry differential_genes \
+   --stage differential_genes \
    -profile apptainer \
    --base_adata $h5adf \
    --outdir $outdir \

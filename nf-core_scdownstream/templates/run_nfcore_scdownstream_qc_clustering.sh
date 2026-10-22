@@ -46,7 +46,7 @@ echo "Running nextflow..."
 # All non-default pipeline parameters (name, species, celltypist_model,
 # clustering_resolutions, automatic_cell_filtering, ...) are set in params_qc_clustering.yml
 $exec run $main \
-   -entry qc_clustering \
+   --stage qc_clustering \
    -profile apptainer,gpu \
    --input $samplesheet \
    --outdir $outdir \

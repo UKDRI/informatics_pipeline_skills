@@ -47,7 +47,7 @@ echo "Running nextflow..."
 # All non-default pipeline parameters (name, species, selected_clustering,
 # celltypist_model) are set in params_downstream.yml
 $exec run $main \
-   -entry downstream \
+   --stage downstream \
    -profile apptainer,gpu \
    --base_adata $h5adf \
    --outdir $outdir \

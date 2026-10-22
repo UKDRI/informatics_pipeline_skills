@@ -94,7 +94,7 @@ Rules:
     value offline (see §5, §7, §8).
 - **`templates/`** holds files that are *copied and edited* per run — never mutated in place.
   A single-entry pipeline has one `run_<pipeline>.sh` + `params.yml`; a pipeline with multiple
-  `-entry` workflows has one `run_<folder>_<entry>.sh` **and** one `params_<entry>.yml` per entry
+  entry points (`-entry` / `--stage`) has one `run_<folder>_<entry>.sh` **and** one `params_<entry>.yml` per entry
   point (see §4.7 and §8). A pipeline with assay variants may add `params_<value>.yml` overlay
   files, which do **not** get their own job script (see §5, "Assay-specific recommended values").
 - **`scripts/`** holds the Python API for that skill (see §7). Even if a script is generic, each
@@ -241,7 +241,7 @@ Both lines are **placeholders in the template** and are always filled by `build_
 
 - `exec` — the command to run Nextflow, one for every pipeline: simply `nextflow` if it is installed
   properly in the environment, or a path to an executable binary. It ships as `nextflow`. A pipeline
-  with a minimum Nextflow version (sopa: ≥ 25.10.4) says so in its SKILL.md.
+  with a minimum Nextflow version (sopa: ≥ 25.10.4, scdownstream: ≥ 25.10.0) says so in its SKILL.md.
 - `main` — the pipeline's `main.nf`, from `pipelines.<pipeline_id>.main`, with an optional `note`
   appended as a `# <note>` comment (e.g. "confirm path on cluster"). The version is explicit — a
   release tag, or a `dev` build for in-development pipelines (e.g. scdownstream, spatialvi) — never a
@@ -285,8 +285,8 @@ export NXF_APPTAINER_CACHEDIR=/nfsdata/apptainer
 ### 4.5 The `nextflow run` invocation — the key convention
 
 CLI flags on the job script are **limited to run-level flags** — the profile, the required input,
-the output dir, the params file, the report, and `-resume` (plus optional `-c` §4.6 / `-entry`
-§4.7). **Every pipeline parameter that differs from the pipeline's default goes into `params.yml`,
+the output dir, the params file, the report, and `-resume` (plus optional `-c` §4.6 / the entry
+selector §4.7). **Every pipeline parameter that differs from the pipeline's default goes into `params.yml`,
 never as a CLI flag.**
 
 ```bash
@@ -302,7 +302,7 @@ $exec run $main \
 echo "Done."
 ```
 
-Allowed on the command line (and only these, plus the optional `-c`, §4.6, and `-entry`, §4.7):
+Allowed on the command line (and only these, plus the optional `-c`, §4.6, and the entry selector, §4.7):
 
 - `-profile <profiles>` — e.g. `apptainer`, or `apptainer,gpu`
 - the pipeline's **required input flag** — usually `--input` (the samplesheet), but entry/pipeline-
@@ -312,7 +312,8 @@ Allowed on the command line (and only these, plus the optional `-c`, §4.6, and 
 - `-with-report` *(optionally with a file path, e.g. `-with-report $resdir/nextflow_report.html`)*
 - `-resume`
 - `-c custom.config` *(optional; see §4.6 — omit when not tuning resources)*
-- `-entry <name>` *(only for pipelines with multiple entry-point workflows; see §4.7)*
+- the **entry selector** *(only for pipelines with multiple entry points; see §4.7)* — `-entry <name>`,
+  or the pipeline's own stage param where it replaces `-entry` (scdownstream's `--stage <name>`)
 
 Anything else (genome, gtf, aligner, protocol, feature flags, …) belongs in `params.yml` (§5).
 
@@ -372,22 +373,28 @@ process/executor directives without touching the pipeline itself.
   }
   ```
 
-### 4.7 Multiple entry points (`-entry`)
+### 4.7 Multiple entry points (`-entry` / `--stage`)
 
-Some pipelines expose more than one workflow, selected with Nextflow's `-entry <name>`. These are
-**distinct, often sequential stages** with different inputs and parameter sets — not interchangeable
-modes.
+Some pipelines expose more than one workflow, selected with Nextflow's `-entry <name>` — or, since
+Nextflow 26.04's strict syntax parser no longer supports `-entry`, with a required pipeline param
+that the default workflow dispatches on (scdownstream: `--stage <name>`). These are **distinct,
+often sequential stages** with different inputs and parameter sets — not interchangeable modes.
+
+Either way the selector is called the **entry selector** here, and it is a **run-level flag**: it
+names what the job script runs, so it lives on the command line of that stage's script, never in
+its `params_<entry>.yml` — even when, like `--stage`, it is technically a pipeline param. (A
+command-line param also overrides a `-params-file` value, so the script's stage always wins.)
 
 - **One template per entry point** — do **not** consolidate them into a single branching script.
   Each stays a simple, linear, hand-editable copy (§3), named `run_<folder>_<entry>.sh` (§8) with
   its own `params_<entry>.yml` (§5).
-- Place **`-entry <name>` first**, right after `run $main`.
+- Place **the entry selector first** (`-entry <name>` or `--stage <name>`), right after `run $main`.
 - The **required input flag is entry-specific** — it is whatever that entry consumes, not always
   `--input`.
 - Everything else follows §4.5/§5 unchanged: only the allowed flags on the command line, all other
   non-default parameters in that entry's `params_<entry>.yml`.
 
-**Worked example — `nf-core:scdownstream`** has three entry points that run in sequence:
+**Worked example — `nf-core:scdownstream`** has three entry points (`--stage`) that run in sequence:
 
 | Entry | Required input | Produces (in its `$outdir`) |
 |---|---|---|
@@ -433,7 +440,7 @@ the bulk input/object files removable and everything else not).
 - Each YAML key is the nf-core parameter name **without** the leading `--`; the value is the
   desired setting.
 - Produced by the skill's Python script (§7) via `yaml.safe_dump`.
-- For a pipeline with multiple `-entry` workflows (§4.7) there is **one params file per entry**,
+- For a pipeline with multiple entry points (§4.7) there is **one params file per entry**,
   named `params_<entry>.yml`, each wired to its own job script's `-params-file`.
 - **Dynamic but validated against the stored schema.** Parameter names are not hard-coded: the
   valid set, value enums, and defaults for a pipeline all come from that pipeline's stored
@@ -465,7 +472,7 @@ the bulk input/object files removable and everything else not).
 | Required input (`--input`, or entry-specific e.g. `--base_adata`) | CLI flag in `run_*.sh`   |
 | Output dir (`--outdir`)                         | CLI flag in `run_*.sh`   |
 | Nextflow run/report (`-profile`, `-with-report`, `-resume`, `-params-file`) | CLI flag in `run_*.sh` |
-| Entry point (`-entry <name>`, §4.7) and optional `-c custom.config` (§4.6) | CLI flag in `run_*.sh`, when used |
+| Entry selector (`-entry <name>`, or a stage param such as scdownstream's `--stage <name>`, §4.7) and optional `-c custom.config` (§4.6) | CLI flag in `run_*.sh`, when used |
 | Variant selector (`--study-type`, §5) | chosen on the `build_job.py` CLI; its **value is written into** `params.yml` |
 | **Any other param that differs from default**   | `params.yml`             |
 | A param left at its pipeline default            | omitted entirely         |
@@ -507,7 +514,7 @@ Current recommendations:
 Other pipelines have no house recommendation yet — add rows here as they are established. This table
 covers **cross-cutting** recommendations only; per-entry and per-assay recommendations live in the
 template files themselves (`params_<entry>.yml`, `params_<value>.yml`) — e.g. scdownstream seeds a
-`name`, `celltypist_model`, `clustering_resolutions` and `automatic_cell_filtering` per entry, and
+`name`, `celltypist_model`, `clustering_resolutions` and `automatic_cell_filtering` (with low `min_genes`/`min_counts` floors) per entry, and
 differentialabundance ships two overlays — `params_mass_spec.yml` seeds the whole limma column set,
 `params_rnaseq.yml` the nf-core:rnaseq counts + gene-lengths pair (§6).
 
@@ -675,7 +682,7 @@ reference, and `base.config` (the repo's `conf/base.config`) is the process-reso
 | nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `4c3883c` |
 | bigbio:quantmsdiann | `bigbio/quantmsdiann` @ `main` | 2.2.0 | — (release) |
 | nf-core:spatialvi | `nf-core/spatialvi` @ `dev` | 1.0dev | `d0fd35d` |
-| nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `e101d8c` |
+| nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `4c21ae8` |
 | nf-core:sopa | `nf-core/sopa` @ tag `1.0.1` | 1.0.1 | — (release) |
 
 **UKDRI forks** (`differentialabundance`, `scdownstream`) are tracked on their **`dev_ukdri`**
@@ -904,8 +911,12 @@ before it writes `params.yml`.
     §6 "Contrast ids"); `nf-core:scdownstream` declares `metadata` (`scripts/metadata.py`: the
     pipeline's ADDMETADATA stop rules, plus every samplesheet sample having a row) and
     `diffgenes_contrasts` (`scripts/contrasts.py`: TSV, comma blocking, no whitespace, required safe
-    ids, and — given the metadata — reference/target levels that actually occur, since a missing
-    level is skipped silently by the pipeline).
+    ids that do not contain `markers_sep` — the separator of the marker-gene JSON set ids, `--` by
+    default, read from the schema unless `--set` overrides it; the pipeline stops on one, so this
+    helper's generated ids also collapse `-` runs — a per-contrast exclusion that sets both
+    `exclude_samples_col` and the comma-separated `exclude_samples_values` or neither, and, given the
+    metadata, reference/target levels and excluded values that actually occur, since the pipeline
+    skips a missing level silently and only logs an exclusion that matches nothing).
 
     **The helper's CLI shape is part of the contract** (§2). `CONFIG` names the module and the
     validator function, but the note the engine prints for a non-local path is a *runnable command*:
@@ -970,7 +981,9 @@ nf-core ones. Their `SKILL.md` **must** document the deltas from upstream (renam
 params, custom modules) so `params.yml` is written against the modified interface, not the
 public nf-core docs.
 
-`nf-core:scdownstream` additionally exposes **three entry points** (§4.7): `qc_clustering`
+`nf-core:scdownstream` additionally exposes **three entry points** (§4.7), selected with its
+required `--stage` param (it replaced `-entry`, which Nextflow 26.04's strict parser rejects; the fork
+needs Nextflow ≥ 25.10.0): `qc_clustering`
 (samplesheet → `<NAME>_qc_clustering.h5ad`), `downstream` (that h5ad via `--base_adata` → marker genes,
 enrichment, LIANA+ → `<NAME>_downstream.h5ad`) and `differential_genes` (that h5ad + a contrasts TSV →
 pseudobulk PyDESeq2 per group label × contrast). They run in sequence and each has its own job script
