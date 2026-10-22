@@ -833,7 +833,10 @@ before it writes `params.yml`.
     (no hard-coded allowlist, so new params/versions need no code change). It **rejects an unknown
     key** and **rejects an out-of-enum value** with a hard error naming the offender, and keeps only
     non-default values — comparing each against its effective runtime default (the `nextflow.config`
-    value if set there, else the schema default; the two can diverge) (§5).
+    value if set there, else the schema default; the two can diverge) (§5). A `--set` value is
+    YAML-coerced (booleans, numbers) **unless the schema types the param as `string`**, which keeps
+    the text verbatim — YAML would otherwise turn `::` into a mapping, `|` into `''` and `1.0` into a
+    float.
   - **Seed the pipeline's recommended non-default values** (§5) by default, report them to the user,
     and let user-supplied values override them. Recommendations live in the shipped
     `templates/params.yml`, so they are validated the same way as any other entry.

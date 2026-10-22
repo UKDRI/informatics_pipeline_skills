@@ -320,13 +320,17 @@ def load_recommended(params_file: str) -> dict:
     return yaml.safe_load(open(path)) or {}
 
 
-def parse_overrides(pairs: list) -> dict:
+def parse_overrides(pairs: list, schema: dict) -> dict:
     out = {}
     for p in pairs or []:
         if "=" not in p:
             die(f"--set expects key=value, got {p!r}")
         k, v = p.split("=", 1)
-        out[k.strip()] = yaml.safe_load(v)  # coerce true/false/int/float where possible
+        k = k.strip()
+        if (schema.get(k) or {}).get("type") == "string":
+            out[k] = v  # verbatim: YAML would turn '::' into a mapping, '|' into '', '1.0' into a float
+        else:
+            out[k] = yaml.safe_load(v)  # coerce true/false/int/float where possible
     return out
 
 
@@ -485,7 +489,7 @@ def main() -> None:
     os.makedirs(args.dest, exist_ok=True)
 
     # base recommendations -> variant overlay -> species-mapped files -> user --set overrides
-    overrides = parse_overrides(args.sets)
+    overrides = parse_overrides(args.sets, schema)
     params = load_recommended(spec["params_file"])
     recommended_keys = set(params)
 
