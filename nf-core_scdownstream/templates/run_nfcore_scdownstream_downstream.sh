@@ -10,9 +10,9 @@
 set -e
 set -o pipefail
 
-# parameters
-exec=/nfsdata/bin/nextflow-25.04.7-dist
-main=/nfsdata/scripts/nf-core/dev/scdownstream/main.nf
+# parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
+exec=NEXTFLOW_EXEC
+main=PIPELINE_MAIN_NF
 
 # CHANGE INPUT_H5AD ANNDATA FILE: the qc_clustering stage's <outdir>/<NAME>_qc_clustering.h5ad,
 # where NAME is that stage's `name` param (scdownstream when it was not set)
@@ -47,7 +47,7 @@ echo "Running nextflow..."
 # All non-default pipeline parameters (name, species, selected_clustering,
 # celltypist_model) are set in params_downstream.yml
 $exec run $main \
-   -entry downstream \
+   --stage downstream \
    -profile apptainer,gpu \
    --base_adata $h5adf \
    --outdir $outdir \

@@ -1,0 +1,10 @@
+# params_merscope.yml — overlay for --technology merscope (Vizgen MERSCOPE)
+# Upstream preset ../assets/predefined/merscope_proseg.config: Proseg on one transcript patch,
+# with the Vizgen segmentation as its prior ('auto'). Other presets: merscope_baysor_*,
+# merscope_cellpose.
+patch_width_microns: -1
+prior_shapes_key: auto
+use_proseg: true
+min_transcripts: 10
+aggregate_channels: true
+pixel_size: 0.108

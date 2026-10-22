@@ -9,10 +9,10 @@
 set -e
 set -o pipefail
 
-# parameters
-exec=/nfsdata/bin/nextflow-25.04.7-dist
+# parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
+exec=NEXTFLOW_EXEC
 # DEV build: UKDRI dev_ukdri, commit 4c3883c; confirm path on cluster
-main=/nfsdata/scripts/nf-core/dev/differentialabundance/main.nf
+main=PIPELINE_MAIN_NF
 
 # CREATE AND CHANGE PATH TO SAMPLESHEET
 samplesheet=/nfsdata/${USER}/PATH_TO_SAMPLE_SHEET

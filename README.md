@@ -18,6 +18,7 @@ cluster. There are two kinds:
 | `nf-core_scdownstream` | single-cell downstream analysis — QC/clustering, markers/enrichment, pseudobulk differential genes per contrast *(UKDRI-modified)* |
 | `nf-core_differentialabundance` | differential abundance *(UKDRI-modified)* |
 | `nf-core_spatialvi` | spatial transcriptomics |
+| `nf-core_sopa` | imaging spatial omics — cell segmentation and aggregation for CosMx, Xenium, MERSCOPE, Visium HD, PhenoCycler, … |
 | `bigbio_quantmsdiann` | DIA proteomics (DIA-NN) |
 
 Each pipeline folder contains its skill definition, job-script template, and pinned reference files.
@@ -81,6 +82,23 @@ pipeline runs on the cluster. So if you change an entry here — or add a specie
 staged under `/nfsdata/genome/…` on the cluster first, otherwise the job fails at launch. Shared
 reference trees are read-only to the skills by design: the `slurm` skill refuses to write into them.
 
+## Cluster install locations
+
+Where Nextflow and each pipeline live on the cluster is also data, not code:
+
+```
+assets/cluster.json
+```
+
+- `nextflow` — the command to run Nextflow: simply `nextflow` if it is installed properly in the
+  environment, or a path to an executable binary. Every generated job script uses it (`exec=`).
+- `pipelines.<pipeline id>.main` — that pipeline's `main.nf` on the cluster (`main=`), with an
+  optional `note` such as "confirm path on cluster".
+
+Edit this file to use another Nextflow or a new pipeline checkout; a skill can also be pointed at a
+different checkout for one run with `build_job.py --main /path/main.nf`. nf-core/sopa needs
+Nextflow ≥ 25.10.4.
+
 ## Key features
 
 - **Validated parameters** — a `params.yml` holds only the values that differ from the pipeline
@@ -133,6 +151,7 @@ ln -s "$PWD"/nf-core_scrnaseq              ~/.claude/skills/
 ln -s "$PWD"/nf-core_scdownstream          ~/.claude/skills/
 ln -s "$PWD"/nf-core_differentialabundance ~/.claude/skills/
 ln -s "$PWD"/nf-core_spatialvi             ~/.claude/skills/
+ln -s "$PWD"/nf-core_sopa                  ~/.claude/skills/
 ln -s "$PWD"/bigbio_quantmsdiann           ~/.claude/skills/
 ln -s "$PWD"/slurm                         ~/.claude/skills/
 ```

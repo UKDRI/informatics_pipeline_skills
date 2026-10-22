@@ -16,6 +16,13 @@ celltypist_model: Mouse_Whole_Brain
 # The FIRST resolution is copied to `leiden`, the default clustering.
 clustering_resolutions: "0.1,0.3,0.5,0.7,1.0,1.5,2.0,2.5,3.0"
 automatic_cell_filtering: true
-# NOTE: min_cells / min_genes / min_counts / max_mito_percentage are left at their defaults
-# and are ignored while automatic_cell_filtering is true — set them here only if you also
-# set automatic_cell_filtering: false.
+# With automatic_cell_filtering, min_genes / min_counts are FLOORS under the per-sample N-MAD
+# lower bounds. The pipeline default min_genes 200 would often override the N-MAD bound and
+# drop small cells (e.g. nuclei), so the floors are set low, as the fork recommends: they
+# only stop empty and near-empty barcodes from passing when the N-MAD bound drops to 0.
+# Restore min_genes 200 (or remove these two lines) if you set automatic_cell_filtering: false.
+min_genes: 10
+min_counts: 20
+# NOTE: max_genes / max_counts / max_mito_percentage are ignored while automatic_cell_filtering
+# is true. min_cells / min_counts_gene (gene filtering) apply in both modes. Any of these can
+# also be set per sample in the samplesheet (SKILL.md §3).

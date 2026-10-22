@@ -1,0 +1,11 @@
+# params.yml — nf-core:sopa (release 1.0.1)
+# Only parameters that DIFFER from the pipeline defaults go here; every key is validated
+# against ../assets/nextflow_schema.json (unknown keys / out-of-enum values are rejected).
+#
+# Upstream selects the technology and segmentation with a predefined -profile
+# (conf/predefined/*.config, pinned in ../assets/predefined/). Those presets only set
+# ordinary params, so this skill writes them here instead: `technology` comes from the
+# REQUIRED --technology flag, and templates/params_<technology>.yml layers that technology's
+# recommended segmentation on top of this file. Override any value with --set.
+#
+# NOTE: --input (the samplesheet) and --outdir are CLI flags in the run script, NOT here.

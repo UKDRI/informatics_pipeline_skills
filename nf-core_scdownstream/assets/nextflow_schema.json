@@ -10,8 +10,15 @@
             "type": "object",
             "fa_icon": "fas fa-terminal",
             "description": "Define where the pipeline should find input data and save output data.",
-            "required": ["outdir"],
+            "required": ["stage", "outdir"],
             "properties": {
+                "stage": {
+                    "type": "string",
+                    "enum": ["qc_clustering", "downstream", "differential_genes"],
+                    "description": "Pipeline stage to run",
+                    "help_text": "The pipeline runs as three sequential stages: `qc_clustering` (QC, integration and clustering from `--input`), `downstream` (marker genes, enrichment and cell-cell communication on the `--base_adata` written by `qc_clustering`) and `differential_genes` (pseudobulk differential expression on the `--base_adata` written by `downstream`, with `--diffgenes_contrasts`). Each stage consumes the finalized h5ad of the previous one. This parameter replaces Nextflow's `-entry` option, which the strict syntax parser does not support.",
+                    "fa_icon": "fas fa-stream"
+                },
                 "input": {
                     "type": "string",
                     "format": "file-path",
@@ -30,7 +37,7 @@
                     "mimetype": "text/tab-separated-values",
                     "pattern": "^\\S+\\.(tsv|txt)$",
                     "description": "Path to a tab-separated file with per-sample metadata to add to the cells' obs.",
-                    "help_text": "Tab-separated file with a header row and one row per sample. The column named by `--metadata_sample_col` holds the `sample` ids from the samplesheet; every other column is added to the `obs` table of that sample's cells. A metadata column that already exists in `obs` is an error. Only used by `-entry qc_clustering`.",
+                    "help_text": "Tab-separated file with a header row and one row per sample. The column named by `--metadata_sample_col` holds the `sample` ids from the samplesheet; every other column is added to the `obs` table of that sample's cells. A metadata column that already exists in `obs` is an error. Only used by `--stage qc_clustering`.",
                     "fa_icon": "fas fa-table"
                 },
                 "metadata_sample_col": {
@@ -103,12 +110,6 @@
             "fa_icon": "fas fa-check-circle",
             "description": "Options for quality control of the input data.",
             "properties": {
-                "mito_genes": {
-                    "type": "string",
-                    "format": "file-path",
-                    "description": "Optional file containing a list of mitochondrial gene symbols (one per line). If provided, it overrides the default 'mt-' prefix heuristic.",
-                    "exists": true
-                },
                 "ambient_correction": {
                     "type": "string",
                     "default": "none",
@@ -148,13 +149,13 @@
                 "automatic_cell_filtering": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Perform automatic filtering of cells based.",
-                    "help_text": "automatic_cell_filtering must be a boolean."
+                    "description": "Derive cell filtering thresholds per sample from N-MAD outlier detection.",
+                    "help_text": "For each sample, thresholds are set from the median absolute deviation (MAD): genes per cell and counts per cell are filtered below the median minus 2.5 MADs and above the median plus 5 MADs, and the mitochondrial percentage above the median plus 5 MADs. The lower bounds for genes and counts never go below `--min_genes` and `--min_counts`, which act as floors, because on skewed samples the N-MAD lower bound is often below 0 and would otherwise remove nothing. The applied thresholds are reported in MultiQC."
                 },
                 "filtering_keep_outliers": {
                     "type": "boolean",
                     "description": "Keep cells that fail the QC thresholds and mark them in obs['outlier'] instead of removing them.",
-                    "help_text": "Works with both the fixed thresholds (`--min_genes`, `--max_genes`, `--min_counts`, `--max_counts`, `--max_mito_percentage`) and the automatic thresholds (`--automatic_cell_filtering`). The marked cells stay in the data and go through integration, clustering and the reports, so they can be inspected (e.g. on the UMAP) before deciding to remove them. Gene filtering (`--min_cells`, `--min_counts_gene`) is unchanged.",
+                    "help_text": "Works with both the fixed thresholds (`--min_genes`, `--max_genes`, `--min_counts`, `--max_counts`, `--max_mito_percentage`) and the automatic thresholds (`--automatic_cell_filtering`). The marked cells stay in the data and go through integration, clustering and the reports, so they can be inspected (e.g. on the UMAP) before deciding to remove them. Gene filtering (`--min_cells`, `--min_counts_gene`) is unchanged. Cells left with no counts after gene filtering are still removed, because empty cells cannot be normalised or integrated.",
                     "fa_icon": "fas fa-flag"
                 },
                 "min_cells": {
@@ -175,8 +176,8 @@
                     "type": "integer",
                     "default": 200,
                     "minimum": 0,
-                    "description": "Required minimum number of genes that are expressed in cell.",
-                    "help_text": "Cells with less expressed genes are removed."
+                    "description": "Minimum number of genes expressed per cell.",
+                    "help_text": "Cells with fewer expressed genes are removed. With `--automatic_cell_filtering`, this is the floor for the automatic lower bound on genes per cell."
                 },
                 "max_genes": {
                     "type": ["integer", "boolean"],
@@ -188,8 +189,8 @@
                     "type": "integer",
                     "default": 0,
                     "minimum": 0,
-                    "description": "Required minimum number of counts per cell.",
-                    "help_text": "Cells with less expressed counts are removed."
+                    "description": "Minimum number of counts per cell.",
+                    "help_text": "Cells with fewer counts are removed. With `--automatic_cell_filtering`, this is the floor for the automatic lower bound on counts per cell."
                 },
                 "max_counts": {
                     "type": ["integer", "boolean"],
@@ -204,12 +205,6 @@
                     "maximum": 100,
                     "description": "Maximum number of mitochindrial genes.",
                     "help_text": "Cells that have a higher percentage will be removed."
-                },
-                "symbol_col": {
-                    "type": "string",
-                    "default": "index",
-                    "description": "Gene symbol column used for filtering.",
-                    "help_text": "This is usually the 'index' of the anndata object."
                 }
             }
         },
@@ -278,7 +273,7 @@
                     "type": "integer",
                     "minimum": 2,
                     "description": "Number of principal components used to build the PCA neighbour graph (and the PCA UMAP). Default: all computed PCs.",
-                    "help_text": "Must not exceed `--pca_n_comps`. Look at the elbow plot in the QC/clustering report, then rerun `-entry qc_clustering` with this option and `-resume`; the scVI integration is reused from the cache. This does not affect the scVI graph or the default clustering (which uses the scVI graph) unless `--cluster_neighbors neighbors_pca` is set."
+                    "help_text": "Must not exceed `--pca_n_comps`. Look at the elbow plot in the QC/clustering report, then rerun `--stage qc_clustering` with this option and `-resume`; the scVI integration is reused from the cache. This does not affect the scVI graph or the default clustering (which uses the scVI graph) unless `--cluster_neighbors neighbors_pca` is set."
                 }
             }
         },
@@ -375,7 +370,7 @@
                 "umap_color_by": {
                     "type": "string",
                     "description": "Comma-separated obs columns to plot on the UMAPs in the QC/clustering and analysis reports, e.g. `sex,diagnosis`.",
-                    "help_text": "Each column is plotted on every UMAP listed in `--umap_color_by_embeddings`. Columns missing from the object are listed in the report and skipped. Columns added with `--metadata` can be used. Applies to the reports of `-entry qc_clustering` and `-entry downstream`."
+                    "help_text": "Each column is plotted on every UMAP listed in `--umap_color_by_embeddings`. Columns missing from the object are listed in the report and skipped. Columns added with `--metadata` can be used. Applies to the reports of `--stage qc_clustering` and `--stage downstream`."
                 },
                 "umap_color_by_embeddings": {
                     "type": "string",
@@ -415,15 +410,23 @@
                 "markers_min_logfc": {
                     "type": "number",
                     "default": 0,
-                    "minimum:": 0,
+                    "minimum": 0,
                     "description": "Minimum log-fold change to consider gene as marker gene."
                 },
                 "markers_n_top": {
                     "type": "integer",
                     "default": 100,
-                    "minimum:": 1,
+                    "minimum": 1,
                     "description": "Number of N top genes to pick as marker genes.",
-                    "help": "If more than N genes satisfy the marker gene thresholds the top N are saved in the marker gene json file."
+                    "help_text": "If more than N genes satisfy the marker gene thresholds the top N are saved in the marker gene json file."
+                },
+                "markers_sep": {
+                    "type": "string",
+                    "default": "--",
+                    "minLength": 1,
+                    "pattern": "^[^\"'\\\\$\\s]+$",
+                    "description": "Separator between the parts of the set ids in the marker-gene JSONs.",
+                    "help_text": "Applies to `--stage downstream` and `--stage differential_genes`. Set ids are `genes<sep>cluster<sep><cluster>` in the downstream marker-gene JSON and `genes<sep><contrast><sep><group><sep><up|down>` in the differential genes marker-gene JSON, e.g. `genes--AD_vs_ctrl--Microglia--up`. The run stops if a cluster value, group value or contrast id contains the separator, so the ids can always be split back into their parts. The default `--` is used because contrast ids often contain `__` (e.g. `condition__treated__vs__control`). To change it, set `markers_sep` in a `-params-file`: a value starting with `-` is awkward to pass on the command line. Quotes, backslashes, `$` and whitespace are not allowed."
                 }
             }
         },
@@ -480,17 +483,6 @@
                     "description": "Specify the models to use for the celltypist cell type annotation",
                     "help_text": "If you want to use multiple models, separate them with a comma. Available models can be found [here](https://www.celltypist.org/models).",
                     "pattern": "^([a-zA-Z0-9_]*(,[a-zA-Z0-9_]*)*)?$"
-                },
-                "celldex_reference": {
-                    "type": "string",
-                    "format": "file-path",
-                    "exists": true,
-                    "schema": "assets/schema_singler.json",
-                    "mimetype": "text/csv",
-                    "pattern": "^\\S+\\.csv$",
-                    "description": "Path to comma-separated file containing information about the celldex references to use for the singleR cell type annotation.",
-                    "help_text": "You will need to create a design file with information about the celldex references to use for the singleR cell type annotation before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 or 4 columns, and a header row. See [usage docs](https://nf-co.re/scdownstream/usage#cell-type-annotation).",
-                    "fa_icon": "fas fa-file-csv"
                 }
             }
         },
@@ -519,10 +511,6 @@
             "type": "object",
             "description": "Options for selecting which tools should be used for certain tasks",
             "properties": {
-                "qc_only": {
-                    "type": "boolean",
-                    "description": "Only run the preprocessing steps, skip the integration and clustering steps"
-                },
                 "skip_liana": {
                     "type": "boolean",
                     "description": "Skip the LIANA step. For large datasets, the pipeline might fail due to high memory usage in this step. Use this option to skip it."
@@ -534,11 +522,6 @@
                 "pseudobulk": {
                     "type": "boolean",
                     "description": "Perform pseudobulking"
-                },
-                "prep_cellxgene": {
-                    "type": "boolean",
-                    "description": "Prepare the output for visualisation in cellxgene",
-                    "fa_icon": "fas fa-chart-line"
                 }
             }
         },
@@ -658,6 +641,28 @@
                     "minimum": 2,
                     "description": "Minimum number of pseudobulk samples per side of a contrast",
                     "help_text": "The threshold applies to each side of the contrast independently: both the target level and the reference level must be backed by at least this many pseudobulk samples. It is evaluated after the object has been split per instance of the group label, so a group label with too few samples on either side is skipped and produces no results table, rather than failing the run. Values below 2 are rejected because a contrast with a single sample on one side cannot be tested at all."
+                },
+                "diffgenes_markers_n_top": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 1,
+                    "description": "Number of top differential genes per group label, contrast and direction in the marker-gene JSON.",
+                    "help_text": "For every instance of the group label and every contrast, genes higher in the target group (`..._up`) and genes lower in the target group (`..._down`) are listed in separate sets, each ranked by the Wald statistic and cut to the top N genes that pass the adjusted p-value and log2 fold change thresholds. The sets are written to `<name>_differential_genes.json.gz`, which has the same structure as the marker-gene JSON of the downstream workflow."
+                },
+                "diffgenes_markers_thr_adj_pvalue": {
+                    "type": "number",
+                    "default": 0.05,
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Adjusted p-value threshold for the marker-gene JSON.",
+                    "help_text": "Genes need an adjusted p-value below this threshold to be listed in the marker-gene JSON. Genes higher and lower in the target group are listed in separate sets (`..._up` / `..._down`), ranked by the Wald statistic, and written to `<name>_differential_genes.json.gz`, which has the same structure as the marker-gene JSON of the downstream workflow."
+                },
+                "diffgenes_markers_min_logfc": {
+                    "type": "number",
+                    "default": 0,
+                    "minimum": 0,
+                    "description": "Minimum absolute log2 fold change for the marker-gene JSON.",
+                    "help_text": "Genes need an absolute log2 fold change of at least this value to be listed in the marker-gene JSON. Genes higher and lower in the target group are listed in separate sets (`..._up` / `..._down`), ranked by the Wald statistic, and written to `<name>_differential_genes.json.gz`, which has the same structure as the marker-gene JSON of the downstream workflow."
                 }
             }
         },

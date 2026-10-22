@@ -1,0 +1,25 @@
+# params_cosmx.yml — overlay for --technology cosmx (NanoString / Bruker CosMx SMI)
+# UKDRI composition, NOT an upstream preset: Cellpose on the DNA stain gives the nuclei/cell
+# boundaries, then Proseg refines them from the transcripts, using the Cellpose boundaries as
+# its prior. Built from ../assets/predefined/cosmx_cellpose.config plus `use_proseg`.
+#
+# - prior_shapes_key is deliberately NOT set: with use_cellpose it falls back to
+#   'cellpose_boundaries' (upstream modules/local/utils.nf getPriorShapesKey). cosmx_proseg's
+#   'auto' would instead use CosMx's own segmentation as the prior.
+# - Proseg runs on ONE transcript patch (sopa asserts this), hence patch_width_microns: -1,
+#   as in every upstream Proseg preset. The pixel patch size is for Cellpose's image patches.
+# - sopa allows one staining-based (cellpose|stardist) and one transcript-based
+#   (proseg|baysor|comseg) method together; for upstream's single-method presets see
+#   ../assets/predefined/cosmx_*.config.
+use_cellpose: true
+cellpose_diameter: 60
+cellpose_channels: DNA
+flow_threshold: 2
+cellprob_threshold: -6
+patch_width_pixel: 6000
+patch_overlap_pixel: 150
+use_proseg: true
+patch_width_microns: -1
+min_area_pixels2: 2000
+min_transcripts: 10
+aggregate_channels: true

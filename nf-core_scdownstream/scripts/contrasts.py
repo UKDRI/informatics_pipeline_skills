@@ -6,14 +6,19 @@ the nf-core/differentialabundance contrasts definition, but the UKDRI scdownstre
 reads it differently from the differentialabundance fork:
 
   * it is TAB-separated (samplesheetToList against assets/schema_contrasts.json), so
-  * `blocking` is COMMA-separated, not ';'-separated, and
+  * `blocking` and `exclude_samples_values` are COMMA-separated, not ';'-separated, and
   * every field must be free of whitespace (the schema's `^\\S+$` patterns), and `id` is
     required — the pipeline invents none.
 
-The contrast id becomes part of every result filename (<name>_<group>_<id>.tsv), and a
-contrast whose reference or target level is absent from the data is SKIPPED SILENTLY.
-So a check against the per-sample metadata — the source of condition/treatment
-columns — catches a mistyped level before the run instead of after it.
+The contrast id becomes part of every result filename (<name>_<group>_<id>.tsv) and of
+the set ids in <name>_differential_genes.json.gz (genes<sep><id><sep><group><sep>up|down),
+whose export STOPS the run when an id contains the separator `markers_sep` ('--' by
+default) — after all the DE work is done. And a
+contrast whose reference or target level is absent from the data is SKIPPED SILENTLY,
+as is an exclusion (`exclude_samples_col` / `exclude_samples_values`) whose values match
+no sample or that sets only one of the two columns — the pipeline only logs a warning.
+So a check against the per-sample metadata — the source of condition/treatment and
+donor columns — catches a mistyped level or donor before the run instead of after it.
 
 Two subcommands:
   build  — derive/normalise the `id` column and write a contrasts.tsv into --dest
@@ -31,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -45,14 +51,20 @@ ID_SEP = "__"          # field separator inside a generated id
 VS_TOKEN = "vs"        # separates target from reference
 BLOCK_TOKEN = "block"  # marks the start of the blocking-variable list
 BLOCKING_DELIM = ","   # what workflows/differential_genes.nf and the DE template split on
+# Comma-separated list columns; --contrast takes them '+'-joined, a CSV ';'-separated.
+LIST_COLS = ("blocking", "exclude_samples_values")
+EXCLUDE_COLS = ("exclude_samples_col", "exclude_samples_values")
 REQUIRED_COLS = ("variable", "reference", "target")
 KNOWN_COLS = ("id", "variable", "reference", "target", "blocking",
               "exclude_samples_col", "exclude_samples_values")
-INACTIVE_COLS = ("exclude_samples_col", "exclude_samples_values")
 OUT_FIELD_ORDER = ("id", "variable", "reference", "target", "blocking")
 OUT_NAME = "contrasts.tsv"
 # obs columns the pipeline itself creates, so a contrast may use them with no metadata.
 PIPELINE_OBS_COLS = ("sample", "batch", "label")
+# The marker-gene JSON set-id separator param; its default is read from the pinned schema.
+SEP_PARAM = "markers_sep"
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                           "assets", "nextflow_schema.json")
 
 
 def die(msg: str) -> "NoReturn":  # type: ignore[name-defined]
@@ -67,14 +79,16 @@ def warn(msg: str) -> None:
 # Id construction
 # --------------------------------------------------------------------------- #
 def sanitize_token(value: str) -> str:
-    """One id token: unsafe runs -> '_', '_' runs collapsed, ends trimmed.
+    """One id token: unsafe runs -> '_', '_' and '-' runs collapsed, ends trimmed.
 
     Collapsing '_' runs is what keeps ID_SEP ('__') unambiguous even though '_' is
     itself a legal token character: a token can never contain a double underscore.
+    Collapsing '-' runs keeps a generated id free of the default `markers_sep` ('--').
     Returns '' when nothing usable is left — the caller decides what that means.
     """
     token = ID_UNSAFE_RE.sub("_", (value or "").strip())
     token = re.sub(r"_{2,}", "_", token)
+    token = re.sub(r"-{2,}", "-", token)
     return token.strip("._-")
 
 
@@ -140,18 +154,37 @@ def metadata_levels(path: str) -> dict:
     return {f: {r.get(f, "") for r in rows} - {""} for f in fields if f}
 
 
+def default_markers_sep() -> str:
+    """The `markers_sep` default from the pinned assets/nextflow_schema.json."""
+    try:
+        with open(SCHEMA_PATH, encoding="utf-8") as fh:
+            schema = json.load(fh)
+    except (OSError, ValueError) as exc:
+        die(f"cannot read {SCHEMA_PATH} for the {SEP_PARAM} default: {exc}")
+    for group in (schema.get("$defs") or schema.get("definitions") or {}).values():
+        prop = (group.get("properties") or {}).get(SEP_PARAM)
+        if prop is not None:
+            return str(prop.get("default", ""))
+    die(f"{SCHEMA_PATH} defines no '{SEP_PARAM}' parameter")
+
+
 # --------------------------------------------------------------------------- #
 # Validation (also imported by build_job.py via CONFIG["sheet_checks"])
 # --------------------------------------------------------------------------- #
-def check_file(path: str, context: dict | None = None, metadata: str | None = None) -> tuple:
+def check_file(path: str, context: dict | None = None, metadata: str | None = None,
+               markers_sep: str | None = None) -> tuple:
     """Validate a contrasts sheet. Returns (errors, warnings) — never raises.
 
     `context` is what build_job.py's sheet_checks hook passes; its "metadata" path (the
-    --metadata flag) is used for the cross-check when it is a readable local file. The
-    CLI passes `metadata` directly instead.
+    --metadata flag) is used for the cross-check when it is a readable local file, and
+    its params' `markers_sep` (a --set override) for the separator check. The CLI passes
+    `metadata` and `markers_sep` directly instead; unset, the separator is the schema
+    default.
     """
     errors: list = []
     warnings: list = []
+    sep = markers_sep or str(((context or {}).get("params") or {}).get(SEP_PARAM) or "") \
+        or default_markers_sep()
     if not os.path.isfile(path):
         return [f"contrasts file not found: {path}"], warnings
     name = os.path.basename(path)
@@ -181,10 +214,6 @@ def check_file(path: str, context: dict | None = None, metadata: str | None = No
         if field not in KNOWN_COLS:
             warnings.append(f"{name}: unrecognised column {field!r}; known columns are "
                             f"{', '.join(KNOWN_COLS)}")
-    for field in INACTIVE_COLS:
-        if field in fields and any(r.get(field) for r in rows):
-            warnings.append(f"{name}: '{field}' is accepted but currently INACTIVE in the "
-                            "pipeline — those samples will NOT be excluded")
     if not rows:
         errors.append(f"{name}: no contrast rows")
 
@@ -201,8 +230,8 @@ def check_file(path: str, context: dict | None = None, metadata: str | None = No
     for num, row in enumerate(rows, start=2):  # row 1 is the header
         for col in KNOWN_COLS:
             value = row.get(col, "")
-            if col == "blocking" and ";" in value:
-                errors.append(f"{name} row {num}: blocking {value!r} is ';'-separated; this "
+            if col in LIST_COLS and ";" in value:
+                errors.append(f"{name} row {num}: {col} {value!r} is ';'-separated; this "
                               f"pipeline splits on ',' — use {value.replace(';', ',')!r}")
             elif re.search(r"\s", value):
                 errors.append(f"{name} row {num}: '{col}' = {value!r} contains whitespace, which "
@@ -213,6 +242,12 @@ def check_file(path: str, context: dict | None = None, metadata: str | None = No
         if row.get("reference") and row.get("reference") == row.get("target"):
             errors.append(f"{name} row {num}: reference and target are both "
                           f"{row['reference']!r}")
+        # The pipeline only logs a warning for a half-set exclusion and excludes nothing.
+        exclude_col, exclude_values = (row.get(c, "") for c in EXCLUDE_COLS)
+        if bool(exclude_col) != bool(exclude_values):
+            have, lack = EXCLUDE_COLS if exclude_col else EXCLUDE_COLS[::-1]
+            errors.append(f"{name} row {num}: '{have}' is set but '{lack}' is empty; the "
+                          "pipeline would exclude no samples — set both or neither")
 
         cid = row.get("id", "")
         if "id" in fields:
@@ -224,6 +259,14 @@ def check_file(path: str, context: dict | None = None, metadata: str | None = No
                               f"{chars}. The id becomes part of the result filenames, so only "
                               "[A-Za-z0-9._-] is allowed"
                               + (f" — use {sanitize_token(cid)!r}" if sanitize_token(cid) else ""))
+            elif sep and sep in cid:
+                errors.append(f"{name} row {num}: id {cid!r} contains the {SEP_PARAM} separator "
+                              f"{sep!r}. The pipeline builds the set ids of "
+                              "<name>_differential_genes.json.gz from it and stops the run — "
+                              f"use an id without {sep!r}"
+                              + (f", e.g. {sanitize_token(cid)!r}"
+                                 if sanitize_token(cid) and sep not in sanitize_token(cid) else "")
+                              + f", or set a different {SEP_PARAM}")
             elif cid in seen:
                 errors.append(f"{name} row {num}: duplicate id {cid!r} (also row {seen[cid]}); "
                               "the two contrasts would overwrite each other's results")
@@ -238,6 +281,20 @@ def check_file(path: str, context: dict | None = None, metadata: str | None = No
                 warnings.append(f"{name} row {num}: column {col!r} is not in {meta_name} nor one "
                                 f"the pipeline creates ({', '.join(PIPELINE_OBS_COLS)}); it must "
                                 "already exist in the input object's obs, or the run stops")
+        if exclude_col and exclude_values:
+            if exclude_col in levels:
+                unmatched = [v for v in split_blocking(exclude_values)
+                             if v not in levels[exclude_col]]
+                if unmatched:
+                    errors.append(
+                        f"{name} row {num}: exclude_samples_values value(s) {', '.join(unmatched)} do "
+                        f"not occur in column {exclude_col!r} of {meta_name} (values: "
+                        f"{', '.join(sorted(levels[exclude_col]))}). The pipeline would only "
+                        "log a warning and keep those samples")
+            elif exclude_col not in PIPELINE_OBS_COLS:
+                warnings.append(f"{name} row {num}: exclude_samples_col {exclude_col!r} is not in "
+                                f"{meta_name}; it must be a sample-level obs column of the input "
+                                "object (constant within each sample), or the run stops")
         if variable in levels:
             present = levels[variable]
             for side in ("reference", "target"):
@@ -256,8 +313,9 @@ def check_file(path: str, context: dict | None = None, metadata: str | None = No
 def parse_contrast_spec(spec: str) -> dict:
     """'variable=condition,reference=control,target=treated,blocking=sex+donor' -> row.
 
-    Comma-separated key=value pairs. Because the blocking list is itself comma-separated
-    in the sheet, several blocking variables are joined with '+' here.
+    Comma-separated key=value pairs. Because the list columns (blocking,
+    exclude_samples_values) are themselves comma-separated in the sheet, several values
+    are joined with '+' here, e.g. exclude_samples_values=D07+D12.
     """
     row: dict = {}
     for field in spec.split(","):
@@ -265,13 +323,13 @@ def parse_contrast_spec(spec: str) -> dict:
             continue
         if "=" not in field:
             die(f"--contrast expects comma-separated key=value pairs, got {field!r} "
-                f"in {spec!r} (join several blocking variables with '+')")
+                f"in {spec!r} (join several blocking variables or excluded values with '+')")
         key, val = field.split("=", 1)
         key = key.strip()
         if key not in KNOWN_COLS:
             die(f"--contrast: unknown key {key!r}; allowed: {', '.join(KNOWN_COLS)}")
         val = val.strip()
-        row[key] = BLOCKING_DELIM.join(p.strip() for p in val.split("+")) if key == "blocking" \
+        row[key] = BLOCKING_DELIM.join(p.strip() for p in val.split("+")) if key in LIST_COLS \
             else val
     missing = [c for c in REQUIRED_COLS if not row.get(c)]
     if missing:
@@ -296,12 +354,13 @@ def cmd_build(args) -> None:
             die(f"{args.infile}: missing required column(s): {', '.join(missing)} "
                 f"(header: {', '.join(fields)})")
         if ext == ".csv":
-            # A CSV cannot carry a comma-separated blocking list; accept the ';' spelling
-            # the differentialabundance sheets use and convert it.
+            # A CSV cannot carry a comma-separated list; accept the ';' spelling the
+            # differentialabundance sheets use and convert it.
             for row in rows:
-                if row.get("blocking"):
-                    row["blocking"] = BLOCKING_DELIM.join(
-                        p.strip() for p in row["blocking"].split(";") if p.strip())
+                for col in LIST_COLS:
+                    if row.get(col):
+                        row[col] = BLOCKING_DELIM.join(
+                            p.strip() for p in row[col].split(";") if p.strip())
     else:
         rows = [parse_contrast_spec(s) for s in args.specs]
         fields = [c for c in KNOWN_COLS if any(r.get(c) for r in rows)]
@@ -309,6 +368,7 @@ def cmd_build(args) -> None:
         die("no contrast rows to write")
 
     out_fields = list(OUT_FIELD_ORDER) + [f for f in fields if f not in OUT_FIELD_ORDER]
+    sep = args.markers_sep or default_markers_sep()
 
     reports = []
     for num, row in enumerate(rows, start=2):  # row 1 is the header
@@ -316,9 +376,10 @@ def cmd_build(args) -> None:
             if not row.get(col):
                 die(f"row {num}: '{col}' is empty; every contrast needs "
                     f"{', '.join(REQUIRED_COLS)}")
-        if ";" in row.get("blocking", ""):
-            die(f"row {num}: blocking {row['blocking']!r} is ';'-separated; this pipeline "
-                f"splits on ',' — use {row['blocking'].replace(';', ',')!r}")
+        for col in LIST_COLS:
+            if ";" in row.get(col, ""):
+                die(f"row {num}: {col} {row[col]!r} is ';'-separated; this pipeline "
+                    f"splits on ',' — use {row[col].replace(';', ',')!r}")
         derived = make_id(row["variable"], row["reference"], row["target"],
                           row.get("blocking", ""))
         current = (row.get("id") or "").strip()
@@ -326,8 +387,12 @@ def cmd_build(args) -> None:
             action = "derived"
         elif args.rebuild_ids:
             action = "kept" if current == derived else "rebuilt"
-        elif ID_SAFE_RE.match(current):
+        elif ID_SAFE_RE.match(current) and sep not in current:
             derived, action = current, "kept"
+        elif ID_SAFE_RE.match(current):
+            warn(f"row {num}: id {current!r} contains the {SEP_PARAM} separator {sep!r}; "
+                 f"replaced with {derived!r}")
+            action = "replaced"
         else:
             chars = ", ".join(repr(c) for c in illegal_chars(current))
             warn(f"row {num}: id {current!r} contains illegal character(s): {chars}; "
@@ -356,7 +421,7 @@ def cmd_build(args) -> None:
         for row in rows:
             writer.writerow({f: row.get(f, "") for f in out_fields})
 
-    errors, warnings = check_file(out_path, metadata=args.metadata)
+    errors, warnings = check_file(out_path, metadata=args.metadata, markers_sep=sep)
     for msg in warnings:
         warn(msg)
     if errors:
@@ -372,7 +437,8 @@ def cmd_build(args) -> None:
 # check
 # --------------------------------------------------------------------------- #
 def cmd_check(args) -> None:
-    errors, warnings = check_file(args.diffgenes_contrasts, metadata=args.metadata)
+    errors, warnings = check_file(args.diffgenes_contrasts, metadata=args.metadata,
+                                  markers_sep=args.markers_sep)
     for msg in warnings:
         warn(msg)
     if errors:
@@ -397,17 +463,21 @@ def main() -> None:
     b = sub.add_parser("build", help="write a contrasts.tsv with validated ids into --dest")
     b.add_argument("--in", dest="infile",
                    help="draft contrasts TSV (or a differentialabundance-style CSV with "
-                        f"';' blocking) with columns {','.join(REQUIRED_COLS)}[,blocking][,id]; "
-                        "never modified")
+                        f"';' lists) with columns {','.join(REQUIRED_COLS)}[,blocking][,id]"
+                        "[,exclude_samples_col,exclude_samples_values]; never modified")
     b.add_argument("--contrast", dest="specs", action="append", default=[],
                    help="one contrast as key=value pairs, e.g. "
                         "'variable=condition,reference=control,target=treated,"
-                        "blocking=sex+donor' (repeatable; alternative to --in)")
+                        "blocking=sex+donor,exclude_samples_col=donor,"
+                        "exclude_samples_values=D07+D12' (repeatable; alternative to --in)")
     b.add_argument("--metadata", help="per-sample metadata TSV to check the columns and levels "
                                       "against")
     b.add_argument("--rebuild-ids", action="store_true",
                    help="regenerate every id to the house convention, replacing ids that "
                         "are safe but non-canonical")
+    b.add_argument("--markers_sep", "--markers-sep", dest="markers_sep",
+                   help="the run's markers_sep, when set, as --markers_sep=<value> "
+                        "(default: the schema default)")
     b.add_argument("--dest", default=".", help="output directory (default: .)")
     b.add_argument("--out-name", default=OUT_NAME, help=f"output filename (default: {OUT_NAME})")
     b.set_defaults(func=cmd_build)
@@ -418,6 +488,9 @@ def main() -> None:
                    help="path to the contrasts TSV")
     c.add_argument("--metadata", help="per-sample metadata TSV to check the columns and levels "
                                       "against")
+    c.add_argument("--markers_sep", "--markers-sep", dest="markers_sep",
+                   help="the run's markers_sep, when set, as --markers_sep=<value> "
+                        "(default: the schema default)")
     c.set_defaults(func=cmd_check)
 
     args = ap.parse_args()

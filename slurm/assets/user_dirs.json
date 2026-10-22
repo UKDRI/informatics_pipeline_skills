@@ -26,5 +26,5 @@
     "/shared/home",
     "/scratch"
   ],
-  "project_roots": []
+  "project_roots": ["/nfsdata/ukdri", "/data/ukdri"]
 }
