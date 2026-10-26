@@ -34,7 +34,7 @@ Pipelines covered:
 - `nf-core:scrnaseq`
 - `nf-core:differentialabundance` *(substantially modified from upstream — see §8)*
 - `bigbio:quantmsdiann`
-- `nf-core:spatialvi`
+- `nf-core:spatialvi` *(UKDRI fork: upstream dev + marker-gene export — see §8)*
 - `nf-core:scdownstream` *(substantially modified from upstream — see §8)*
 - `nf-core:sopa`
 
@@ -461,7 +461,7 @@ the bulk input/object files removable and everything else not).
   values (e.g. custom file paths) may not appear in it. Example: scdownstream's `celltypist_model`
   is checked against `assets/celltypist_models.json` (see §7, §8).
 - Parameters for pipelines are defined in the pipeline's github repo: `nextflow.config` and `nextflow_schema.json`.
-  The github repos are: https://github.com/nf-core/rnaseq, https://github.com/nf-core/scrnaseq, https://github.com/UKDRI/differentialabundance, https://github.com/UKDRI/scdownstream, https://github.com/nf-core/spatialvi/tree/dev, and https://github.com/bigbio/quantmsdiann
+  The github repos are: https://github.com/nf-core/rnaseq, https://github.com/nf-core/scrnaseq, https://github.com/UKDRI/differentialabundance, https://github.com/UKDRI/scdownstream, https://github.com/UKDRI/spatialvi, and https://github.com/bigbio/quantmsdiann
   Usage can be obtained from nf-core docs e.g. https://nf-co.re/rnaseq/3.26.0. For scdownstream and differentialabundance usage is explained at: https://wiki.informatics.ukdri.ac.uk/en/Pipelines/nfcore_scdownstream and https://wiki.informatics.ukdri.ac.uk/en/Pipelines/nfcore_differentialabundance
 
 
@@ -681,11 +681,11 @@ reference, and `base.config` (the repo's `conf/base.config`) is the process-reso
 | nf-core:scrnaseq | `nf-core/scrnaseq` @ `master` | 4.2.0 | — (release) |
 | nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `4c3883c` |
 | bigbio:quantmsdiann | `bigbio/quantmsdiann` @ `main` | 2.2.0 | — (release) |
-| nf-core:spatialvi | `nf-core/spatialvi` @ `dev` | 1.0dev | `d0fd35d` |
+| nf-core:spatialvi | `UKDRI/spatialvi` @ `dev_ukdri` | 1.0dev | `8c9ced7` |
 | nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `4c21ae8` |
 | nf-core:sopa | `nf-core/sopa` @ tag `1.0.1` | 1.0.1 | — (release) |
 
-**UKDRI forks** (`differentialabundance`, `scdownstream`) are tracked on their **`dev_ukdri`**
+**UKDRI forks** (`differentialabundance`, `scdownstream`, `spatialvi`) are tracked on their **`dev_ukdri`**
 branch — the repo default; `master` there is stale/not a normal branch and must not be used.
 
 **Re-download all three files whenever a pipeline version is bumped** (i.e. when the pipeline's
@@ -994,6 +994,11 @@ It also stores `assets/celltypist_models.json` (the CellTypist model list); its 
 value is checked against that list — accepting a known model name or a custom-model file path,
 warning otherwise — per §7. Its `SKILL.md` carries prose custom-config recommendations (§4.6),
 e.g. bump process memory to `225.GB` for datasets exceeding 250,000 cells.
+
+**`nf-core:spatialvi`** runs from the UKDRI fork, which is upstream `nf-core/spatialvi@dev` plus a
+marker-gene JSON export (ported from scdownstream) and six params for it (`report_n_top_markers`,
+`markers_*`). It is a light fork rather than a substantially modified one, but its `SKILL.md` still
+documents those deltas, per the rule above.
 
 **`nf-core:sopa`** is an unmodified upstream release, but its interface needs one translation.
 Upstream picks the technology and segmentation with a predefined `-profile` (`cosmx_proseg`,

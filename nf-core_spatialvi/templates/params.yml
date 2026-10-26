@@ -13,3 +13,5 @@
 #   qc_min_genes: 500              # default 250
 #   integration_method: scanorama  # default harmony (enum: harmony, scanorama)
 #   skip_integration: true         # single-sample runs
+#   markers_thr_adj_pvalue: 0.01   # UKDRI fork marker-gene JSON filter; default 0.05
+#   markers_n_top: 200             # UKDRI fork; default 100
