@@ -11,7 +11,7 @@ set -o pipefail
 
 # parameters (exec= and main= are filled by build_job.py from <repo-root>/assets/cluster.json)
 exec=NEXTFLOW_EXEC
-# dev build — commit d0fd35d; confirm path on cluster
+# UKDRI fork, dev_ukdri build — commit 8c9ced7; confirm path on cluster
 main=PIPELINE_MAIN_NF
 
 # CREATE AND CHANGE PATH TO SAMPLESHEET

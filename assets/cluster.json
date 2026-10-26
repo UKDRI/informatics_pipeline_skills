@@ -32,8 +32,8 @@
       "note": "confirm path on cluster"
     },
     "nf-core:spatialvi": {
-      "main": "/nfsdata/scripts/nf-core/nf-core-spatialvi_dev/nf-core-spatialvi_dev/dev/main.nf",
-      "note": "dev downloaded 2026-10-13, includes PR #155 (merged normalisation/HVG/PCA before integration); old build in .../nf-core-spatialvi_dev/dev"
+      "main": "/nfsdata/scripts/nf-core/dev/spatialvi/main.nf",
+      "note": "UK DRI fork spatialvi"
     },
     "nf-core:scdownstream": {
       "main": "/nfsdata/scripts/nf-core/dev/scdownstream/main.nf"

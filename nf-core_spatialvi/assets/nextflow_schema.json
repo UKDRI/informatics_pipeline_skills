@@ -143,7 +143,7 @@
                     "type": "integer",
                     "default": 0,
                     "description": "Target sum for normalization of counts per cell.",
-                    "help_text": "By default (with value 0), normalizes so that each cell has a total count equal to the median cell total before normalization. By specifying `1000000` the normalization become CPM normalization; `10000` is another common option for scRNA-seq data.",
+                    "help_text": "By default (with value 0), normalizes so that each cell has a total count equal to the median cell total before normalization; per sample for the per-sample analyses, and across all samples for the integration. By specifying `1000000` the normalization become CPM normalization; `10000` is another common option for scRNA-seq data.",
                     "fa_icon": "fas fa-crosshairs"
                 }
             }
@@ -259,8 +259,56 @@
                     "type": "string",
                     "default": "wilcoxon",
                     "description": "Statistical method to use for differential expression testing.",
+                    "help_text": "The marker-gene JSON export is skipped with `logreg`, because it computes no p-values, fold changes or expression fractions.",
                     "enum": ["logreg", "t-test", "t-test_overestim_var", "wilcoxon"],
                     "fa_icon": "fas fa-tag"
+                },
+                "report_n_top_markers": {
+                    "type": "integer",
+                    "default": 250,
+                    "minimum": 1,
+                    "description": "Number of top marker genes per cluster listed in the reports.",
+                    "fa_icon": "fas fa-hashtag"
+                },
+                "markers_thr_adj_pvalue": {
+                    "type": "number",
+                    "default": 0.05,
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Adjusted P-value threshold for detecting marker genes.",
+                    "fa_icon": "fas fa-hashtag"
+                },
+                "markers_pct_nz": {
+                    "type": "number",
+                    "default": 0.1,
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Minimum fraction of spots expressing gene in group to consider it as marker gene.",
+                    "fa_icon": "fas fa-hashtag"
+                },
+                "markers_min_logfc": {
+                    "type": "number",
+                    "default": 0,
+                    "minimum": 0,
+                    "description": "Minimum log-fold change to consider gene as marker gene.",
+                    "fa_icon": "fas fa-hashtag"
+                },
+                "markers_n_top": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 1,
+                    "description": "Number of N top genes to pick as marker genes.",
+                    "help_text": "If more than N genes satisfy the marker gene thresholds the top N are saved in the marker gene JSON file. The JSON export is skipped with `--rank_genes_method logreg`, because it computes no p-values, fold changes or expression fractions.",
+                    "fa_icon": "fas fa-hashtag"
+                },
+                "markers_sep": {
+                    "type": "string",
+                    "default": "--",
+                    "minLength": 1,
+                    "pattern": "^[^\"'\\\\$\\s]+$",
+                    "description": "Separator between the parts of the set ids in the marker-gene JSON.",
+                    "help_text": "Set ids are built as `genes<sep>cluster<sep><cluster>`. The run stops if a cluster value contains the separator. Quotes, backslashes, `$` and whitespace are not allowed. A value starting with `-` is best set via `-params-file`.",
+                    "fa_icon": "fas fa-grip-lines"
                 }
             }
         },

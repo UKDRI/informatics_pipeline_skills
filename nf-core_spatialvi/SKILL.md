@@ -17,10 +17,38 @@ optional Space Ranger processing followed by QC, normalization, clustering, spat
 genes and multi-sample integration). This skill only produces files. The generated job script is what
 the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sbatch`.
 
-**Dev pipeline.** spatialvi is tracked on the `dev` branch (version `1.0dev`, commit `d0fd35d`).
-The job script's `main=` is filled from `<repo-root>/assets/cluster.json`:
-`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a dev build, not a release tag; confirm the exact
-path on the cluster before submitting.
+**UKDRI fork, dev pipeline.** spatialvi runs from the UK DRI fork
+[`UKDRI/spatialvi`](https://github.com/UKDRI/spatialvi), tracked on its default **`dev_ukdri`**
+branch (version `1.0dev`, commit `8c9ced7`) — not `nf-core/spatialvi`. The job script's `main=` is
+filled from `<repo-root>/assets/cluster.json`: `/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a
+dev build, not a release tag; confirm the exact path on the cluster before submitting.
+
+**Deltas from upstream `nf-core/spatialvi@dev`** (the fork is upstream dev plus the UK DRI
+marker-gene export; everything else matches the public docs):
+- **Marker-gene JSON export** (`SCANPY_EXPORT_MARKERS`, ported from UK DRI scdownstream): marker
+  genes per cluster are written as gzipped JSON, per sample (`<SAMPLE>/data/<SAMPLE>_markers.json.gz`)
+  and, unless `skip_integration`, for the integrated clusters
+  (`integration/data/<METHOD>_markers.json.gz`), in the same format as scdownstream. Each gene set
+  id is `genes<sep>cluster<sep><cluster>`. Skipped entirely with `rank_genes_method: logreg` (no
+  p-values / fold changes / expression fractions to filter on).
+- **Marker genes for the integrated clusters**, shown in the integration report; per-sample and
+  integrated reports gain a top-3 dotplot and per-cluster tables of the top markers.
+- **New parameters** (all optional, in `params.yml`):
+
+  | param | default | meaning |
+  |---|---|---|
+  | `report_n_top_markers` | `250` | top marker genes per cluster listed in the reports (≥ 1) |
+  | `markers_thr_adj_pvalue` | `0.05` | adjusted p-value cut-off for the JSON export (0–1) |
+  | `markers_pct_nz` | `0.1` | min fraction of the cluster's spots expressing the gene (0–1) |
+  | `markers_min_logfc` | `0` | min log2 fold change (≥ 0) |
+  | `markers_n_top` | `100` | max marker genes per cluster in the JSON (≥ 1) |
+  | `markers_sep` | `--` | separator in the gene-set ids; no quotes, backslashes, `$` or whitespace; the run stops if a cluster name contains it |
+
+  `build_job.py` checks these keys exist but not their ranges or the `markers_sep` pattern — the
+  pipeline's nf-schema validation rejects out-of-range values at launch. Because `params.yml` is a
+  `-params-file`, a `markers_sep` starting with `-` is safe there (it would not be as a CLI flag).
+- `SCANPY_RANK_GENES_GROUPS` now records `pts`/`pts_rest` (fraction of spots expressing each gene
+  in/outside the cluster) in `uns["rank_genes_groups"]`; the integrated ranking gets 36 GB × attempt.
 
 ## 2. Required inputs
 - **`samplesheet.csv`** — prepared beforehand. Its columns are derived from the pipeline's
@@ -57,7 +85,8 @@ Ask the user for: the samplesheet path, a results directory on `/data`, which in
 have (2- vs 5-column), and any non-default parameters. Common non-defaults: `spaceranger_reference`
 (mouse/custom genome for the raw path), `hd_bin_size` (Visium HD; enum `2|8|16`, default `8`), QC
 thresholds (`qc_min_counts` 500, `qc_min_genes` 250, `qc_mito_threshold` 20, …),
-`integration_method` (`harmony`|`scanorama`), and `skip_integration` for single-sample runs.
+`integration_method` (`harmony`|`scanorama`), `skip_integration` for single-sample runs, and the
+fork's marker-gene filters (`markers_*`, `report_n_top_markers` — see §1).
 **There is no UKDRI house recommendation for spatialvi**, so `templates/params.yml` ships
 effectively empty (comments only) — nothing is pre-applied.
 
@@ -82,9 +111,9 @@ python3 scripts/build_job.py \
 
 ## 5. Fill the SLURM template
 `build_job.py` also writes the filled `run_nfcore_spatialvi.sh` (samplesheet + resdir lines set)
-into `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run and that the pinned dev
-`main.nf` path (`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf`, commit `d0fd35d`) exists on the
-cluster — this is a dev build, not a tagged release.
+into `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run and that the pinned
+`main.nf` path (`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf`, `UKDRI/spatialvi@dev_ukdri`
+commit `8c9ced7`) exists on the cluster — this is a dev build, not a tagged release.
 
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_spatialvi.sh` and `params.yml`, and that the
