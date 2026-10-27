@@ -681,7 +681,7 @@ reference, and `base.config` (the repo's `conf/base.config`) is the process-reso
 | nf-core:scrnaseq | `nf-core/scrnaseq` @ `master` | 4.2.0 | — (release) |
 | nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `4c3883c` |
 | bigbio:quantmsdiann | `bigbio/quantmsdiann` @ `main` | 2.2.0 | — (release) |
-| nf-core:spatialvi | `UKDRI/spatialvi` @ `dev_ukdri` | 1.0dev | `8c9ced7` |
+| nf-core:spatialvi | `UKDRI/spatialvi` @ `dev_ukdri` | 1.0dev | `db24833` |
 | nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `4c21ae8` |
 | nf-core:sopa | `nf-core/sopa` @ tag `1.0.1` | 1.0.1 | — (release) |
 

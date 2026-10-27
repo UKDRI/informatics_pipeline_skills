@@ -19,7 +19,7 @@ the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sb
 
 **UKDRI fork, dev pipeline.** spatialvi runs from the UK DRI fork
 [`UKDRI/spatialvi`](https://github.com/UKDRI/spatialvi), tracked on its default **`dev_ukdri`**
-branch (version `1.0dev`, commit `8c9ced7`) — not `nf-core/spatialvi`. The job script's `main=` is
+branch (version `1.0dev`, commit `db24833`) — not `nf-core/spatialvi`. The job script's `main=` is
 filled from `<repo-root>/assets/cluster.json`: `/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a
 dev build, not a release tag; confirm the exact path on the cluster before submitting.
 
@@ -32,7 +32,8 @@ marker-gene export; everything else matches the public docs):
   id is `genes<sep>cluster<sep><cluster>`. Skipped entirely with `rank_genes_method: logreg` (no
   p-values / fold changes / expression fractions to filter on).
 - **Marker genes for the integrated clusters**, shown in the integration report; per-sample and
-  integrated reports gain a top-3 dotplot and per-cluster tables of the top markers.
+  integrated reports gain a "Differential genes per cluster" section with a top-3 dotplot and
+  searchable, sortable per-cluster tables of the top markers.
 - **New parameters** (all optional, in `params.yml`):
 
   | param | default | meaning |
@@ -113,7 +114,7 @@ python3 scripts/build_job.py \
 `build_job.py` also writes the filled `run_nfcore_spatialvi.sh` (samplesheet + resdir lines set)
 into `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run and that the pinned
 `main.nf` path (`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf`, `UKDRI/spatialvi@dev_ukdri`
-commit `8c9ced7`) exists on the cluster — this is a dev build, not a tagged release.
+commit `db24833`) exists on the cluster — this is a dev build, not a tagged release.
 
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_spatialvi.sh` and `params.yml`, and that the
