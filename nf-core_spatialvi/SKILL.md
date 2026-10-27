@@ -19,7 +19,7 @@ the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sb
 
 **UKDRI fork, dev pipeline.** spatialvi runs from the UK DRI fork
 [`UKDRI/spatialvi`](https://github.com/UKDRI/spatialvi), tracked on its default **`dev_ukdri`**
-branch (version `1.0dev`, commit `db24833`) — not `nf-core/spatialvi`. The job script's `main=` is
+branch (version `1.0dev`, commit `c49fcc5`) — not `nf-core/spatialvi`. The job script's `main=` is
 filled from `<repo-root>/assets/cluster.json`: `/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a
 dev build, not a release tag; confirm the exact path on the cluster before submitting.
 
@@ -114,7 +114,7 @@ python3 scripts/build_job.py \
 `build_job.py` also writes the filled `run_nfcore_spatialvi.sh` (samplesheet + resdir lines set)
 into `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run and that the pinned
 `main.nf` path (`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf`, `UKDRI/spatialvi@dev_ukdri`
-commit `db24833`) exists on the cluster — this is a dev build, not a tagged release.
+commit `c49fcc5`) exists on the cluster — this is a dev build, not a tagged release.
 
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_spatialvi.sh` and `params.yml`, and that the
