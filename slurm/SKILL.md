@@ -307,8 +307,9 @@ Only these are removable, matched on the final path component:
   `<name>_qc_clustering.h5ad` / `<name>_downstream.h5ad` are the `--base_adata` inputs of
   scdownstream's `downstream` / `differential_genes` entries (re-making one means re-running the stage
   that wrote it); a sopa `{sample}.zarr` is that run's main result (the SpatialData object with the
-  segmentation), not scratch; `.raw`/`.d`/`fastq`/`sra` data must be
-  re-downloaded before a run can be repeated.
+  segmentation), not scratch; a spatialvi `<METHOD>.zarr.zip` / `merged.zarr.zip` matches `*.zip`
+  but is that run's main SpatialData result, not a re-fetchable input; `.raw`/`.d`/`fastq`/`sra`
+  data must be re-downloaded before a run can be repeated.
 - To clear several files of one kind, list them first, show the user, then remove them **one explicit
   path at a time**. Never a glob.
 - **In a shared project folder** (rule 8) cleanup removes **only the user's own files**. If anything

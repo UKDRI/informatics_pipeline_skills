@@ -19,12 +19,20 @@ the **`slurm` skill** uses to transfer the run to the HPC and submit it with `sb
 
 **UKDRI fork, dev pipeline.** spatialvi runs from the UK DRI fork
 [`UKDRI/spatialvi`](https://github.com/UKDRI/spatialvi), tracked on its default **`dev_ukdri`**
-branch (version `1.0dev`, commit `c49fcc5`) — not `nf-core/spatialvi`. The job script's `main=` is
+branch (version `1.0dev`, commit `586caa3`) — not `nf-core/spatialvi`. The job script's `main=` is
 filled from `<repo-root>/assets/cluster.json`: `/nfsdata/scripts/nf-core/dev/spatialvi/main.nf` — a
 dev build, not a release tag; confirm the exact path on the cluster before submitting.
 
 **Deltas from upstream `nf-core/spatialvi@dev`** (the fork is upstream dev plus the UK DRI
-marker-gene export; everything else matches the public docs):
+marker-gene export and zipped SpatialData output; everything else matches the public docs):
+- **SpatialData published as a single `.zarr.zip`** (`SDATA_ZIP`), not as `.zarr` directories:
+  `integration/data/<METHOD>.zarr.zip` (integrated object of all samples), or
+  `integration/data/merged.zarr.zip` (merged, no integration results) when `skip_integration` or
+  `skip_downstream` is set. The `merged.zarr` / `<METHOD>.zarr` directories are no longer
+  published. The archive is uncompressed (BioImage Archive Zarr layout) with the `.zarr/` directory
+  as its single top-level entry — `unzip harmony.zarr.zip` recreates `harmony.zarr`, which
+  `spatialdata.read_zarr()` / napari-spatialdata open; SpatialData can't read the zip directly.
+  Unzip on the cluster with the `slurm` skill's `run_uncompress.sh` job, never on a login node.
 - **Marker-gene JSON export** (`SCANPY_EXPORT_MARKERS`, ported from UK DRI scdownstream): marker
   genes per cluster are written as gzipped JSON, per sample (`<SAMPLE>/data/<SAMPLE>_markers.json.gz`)
   and, unless `skip_integration`, for the integrated clusters
@@ -114,7 +122,7 @@ python3 scripts/build_job.py \
 `build_job.py` also writes the filled `run_nfcore_spatialvi.sh` (samplesheet + resdir lines set)
 into `--dest`. Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run and that the pinned
 `main.nf` path (`/nfsdata/scripts/nf-core/dev/spatialvi/main.nf`, `UKDRI/spatialvi@dev_ukdri`
-commit `c49fcc5`) exists on the cluster — this is a dev build, not a tagged release.
+commit `586caa3`) exists on the cluster — this is a dev build, not a tagged release.
 
 ## 6. Hand back
 Tell the user the paths of the generated `run_nfcore_spatialvi.sh` and `params.yml`, and that the

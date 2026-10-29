@@ -681,7 +681,7 @@ reference, and `base.config` (the repo's `conf/base.config`) is the process-reso
 | nf-core:scrnaseq | `nf-core/scrnaseq` @ `master` | 4.2.0 | — (release) |
 | nf-core:differentialabundance | `UKDRI/differentialabundance` @ `dev_ukdri` | 1.5.0 | `4c3883c` |
 | bigbio:quantmsdiann | `bigbio/quantmsdiann` @ `main` | 2.2.0 | — (release) |
-| nf-core:spatialvi | `UKDRI/spatialvi` @ `dev_ukdri` | 1.0dev | `c49fcc5` |
+| nf-core:spatialvi | `UKDRI/spatialvi` @ `dev_ukdri` | 1.0dev | `586caa3` |
 | nf-core:scdownstream | `UKDRI/scdownstream` @ `dev_ukdri` | 0.0.1dev | `4c21ae8` |
 | nf-core:sopa | `nf-core/sopa` @ tag `1.0.1` | 1.0.1 | — (release) |
 
@@ -1320,6 +1320,8 @@ path** — its directory name, or its file extension:
     means re-running the whole stage that wrote it (and every stage before it, if those are gone too).
   - a sopa `{sample}.zarr` is that run's **main result** — the SpatialData object with the
     segmentation — not scratch; regenerating it means re-running the whole segmentation.
+  - a spatialvi `<METHOD>.zarr.zip` / `merged.zarr.zip` matches `*.zip` but is that run's **main
+    SpatialData result**, not a downloaded input — regenerating it means re-running the pipeline.
   - an `outs` directory can be the **`spaceranger_dir` input** of a spatialvi processed-data run, and
     `.h5`/`.h5ad` files are the per-sample inputs listed in a scdownstream samplesheet.
   - `.raw` / `.d` data referenced by a `*.sdrf.tsv`, and `fastq`/`sra` downloads referenced by a
