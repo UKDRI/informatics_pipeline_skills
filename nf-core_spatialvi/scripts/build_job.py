@@ -195,21 +195,32 @@ def validate_params(params: dict, schema: dict, value_lists: dict) -> None:
 def check_value_list(key: str, value: str, list_file: str) -> None:
     """Advisory check of a free-text value against a stored list (warn, never error).
 
-    A value containing a path separator is treated as a custom file path and accepted.
-    Otherwise it is matched (ignoring a trailing .pkl) against the list's names.
+    The value is a comma-separated list; each entry is checked on its own. An entry that
+    contains a path separator or ends in .pkl is a local file (e.g. a custom model) and is
+    accepted without a name check — but a .pkl entry whose name is a listed built-in warns,
+    since it is read as a file, not as that built-in. Any other entry is matched against
+    the list's names (ignoring their .pkl).
     """
-    if "/" in value:
-        return  # custom file path
+    entries = [e.strip() for e in value.split(",") if e.strip()]
     path = os.path.join(ASSETS_DIR, list_file)
     if not os.path.isfile(path):
-        warn(f"value list {list_file} missing; cannot check '{key}'")
+        if any("/" not in e for e in entries):
+            warn(f"value list {list_file} missing; cannot check '{key}'")
         return
     data = json.load(open(path))
-    names = [m.get("filename", "") for m in data.get("models", [])]
     norm = lambda s: s[:-4] if s.endswith(".pkl") else s
-    if norm(value) not in [norm(n) for n in names]:
-        warn(f"'{key}' = {value!r} not in {list_file}; "
-             f"if this is a custom model, give a file path instead.")
+    names = {norm(m.get("filename", "")) for m in data.get("models", [])}
+    for entry in entries:
+        if "/" in entry:
+            continue  # a file path
+        if entry.endswith(".pkl"):
+            if norm(entry) in names:
+                warn(f"'{key}' entry {entry!r} is read as a local file, not as the built-in "
+                     f"{norm(entry)!r}; drop the .pkl to use the built-in.")
+            continue  # a local file
+        if entry not in names:
+            warn(f"'{key}' entry {entry!r} not in {list_file}; "
+                 f"if this is a custom model, give its file path instead.")
 
 
 def check_sheets(params: dict, sheet_checks: dict, context: dict) -> None:

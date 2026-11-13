@@ -8,7 +8,8 @@
 #
 # `name` prefixes the stage output: <outdir>/<name>_downstream.h5ad is the --base_adata of
 # the differential_genes stage. Use the SAME name in all three stages (--set name=<study>).
-# NOTE: celltypist_model below is MOUSE-specific — change it when running human data.
+# NOTE: celltypist_model below is HUMAN-specific (adult prefrontal cortex) — change it
+#       for mouse data (e.g. Mouse_Whole_Brain) or other tissues.
 name: scdownstream
 selected_clustering: leiden_1.0
-celltypist_model: Mouse_Whole_Brain
+celltypist_model: Adult_Human_PrefrontalCortex

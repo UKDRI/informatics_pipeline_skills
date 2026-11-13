@@ -10,9 +10,10 @@
 #
 # `name` prefixes the stage output: <outdir>/<name>_qc_clustering.h5ad is the --base_adata of
 # the downstream stage. Use the SAME name in all three stages (--set name=<study>).
-# NOTE: celltypist_model below is MOUSE-specific — change it when running human data.
+# NOTE: celltypist_model below is HUMAN-specific (adult prefrontal cortex) — change it
+#       for mouse data (e.g. Mouse_Whole_Brain) or other tissues.
 name: scdownstream
-celltypist_model: Mouse_Whole_Brain
+celltypist_model: Adult_Human_PrefrontalCortex
 # The FIRST resolution is copied to `leiden`, the default clustering.
 clustering_resolutions: "0.1,0.3,0.5,0.7,1.0,1.5,2.0,2.5,3.0"
 automatic_cell_filtering: true
