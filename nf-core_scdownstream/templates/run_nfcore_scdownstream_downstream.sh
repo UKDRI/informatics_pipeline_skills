@@ -15,7 +15,8 @@ exec=NEXTFLOW_EXEC
 main=PIPELINE_MAIN_NF
 
 # CHANGE INPUT_H5AD ANNDATA FILE: the qc_clustering stage's <outdir>/<NAME>_qc_clustering.h5ad,
-# where NAME is that stage's `name` param (scdownstream when it was not set)
+# where NAME is that stage's `name` param (scdownstream when it was not set) — or, after an
+# annotate run on it, the annotate stage's <outdir>/<NAME>_annotate.h5ad
 h5adf=/data/${USER}/PROJECT_NAME/scdownstream/qc_clustering/out/NAME_qc_clustering.h5ad
 # CHANGE RESULTS_FOLDER
 resdir=/data/${USER}/PROJECT_NAME/scdownstream/downstream

@@ -15,7 +15,7 @@ cluster. There are two kinds:
 |---|---|
 | `nf-core_rnaseq` | bulk RNA-seq |
 | `nf-core_scrnaseq` | single-cell RNA-seq |
-| `nf-core_scdownstream` | single-cell downstream analysis — QC/clustering, markers/enrichment, pseudobulk differential genes per contrast *(UKDRI-modified)* |
+| `nf-core_scdownstream` | single-cell downstream analysis — QC/clustering, markers/enrichment, pseudobulk differential genes per contrast, CellTypist/scANVI model training and annotation *(UKDRI-modified)* |
 | `nf-core_differentialabundance` | differential abundance *(UKDRI-modified)* |
 | `nf-core_spatialvi` | spatial transcriptomics |
 | `nf-core_sopa` | imaging spatial omics — cell segmentation and aggregation for CosMx, Xenium, MERSCOPE, Visium HD, PhenoCycler, … |

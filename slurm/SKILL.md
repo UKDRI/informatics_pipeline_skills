@@ -304,9 +304,11 @@ Only these are removable, matched on the final path component:
   a cleanup (after a download, or after a cancel) is not the same as being told to do it.
 - It prints the target's size and contents, and requires confirmation.
 - **Name the cost when it matters:** `out`/`outs` are results, not scratch;
-  `<name>_qc_clustering.h5ad` / `<name>_downstream.h5ad` are the `--base_adata` inputs of
-  scdownstream's `downstream` / `differential_genes` entries (re-making one means re-running the stage
-  that wrote it); a sopa `{sample}.zarr` is that run's main result (the SpatialData object with the
+  `<name>_qc_clustering.h5ad` / `<name>_downstream.h5ad` / `<name>_annotate.h5ad` are the
+  `--base_adata` inputs of scdownstream's `downstream` / `differential_genes` / `annotate` entries
+  (re-making one means re-running the stage that wrote it); a scdownstream
+  `models/celltypist/<MODEL>.pkl` is a trained model, not a dataset object (re-making it means
+  re-training); a sopa `{sample}.zarr` is that run's main result (the SpatialData object with the
   segmentation), not scratch; a spatialvi `<METHOD>.zarr.zip` / `merged.zarr.zip` matches `*.zip`
   but is that run's main SpatialData result, not a re-fetchable input; `.raw`/`.d`/`fastq`/`sra`
   data must be re-downloaded before a run can be repeated.

@@ -1,0 +1,25 @@
+# params.yml — nf-core:scdownstream (entry: train_models)
+# Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
+# Trains CellTypist and scANVI cell type models on an annotated reference h5ad (the job script
+# passes it as --train_adata). No species is needed.
+#
+# Nothing is seeded: every value below depends on the reference, so ask for it and pass it with
+# --set. build_job.py warns when train_label_col or train_name is left unset.
+#   train_label_col     REQUIRED. obs column with the cell type labels, used exactly as written
+#                       (only train_unknown_label, default 'unknown', and empty values count as
+#                       unlabelled).
+#   train_name          model name: models/celltypist/<train_name>.pkl,
+#                       models/scanvi/<train_name>/model.pt, and the prediction columns
+#                       celltypist:<train_name> / scanvi:<train_name>. Letters, digits, '_' and
+#                       '-' only. Falls back to `name`, then 'reference'.
+#   train_counts_layer  where the RAW counts are: X (default) or a layer, e.g. counts for an
+#                       scdownstream output.
+#   train_batch_col     obs column with the batch (default batch; one batch if missing).
+#   train_symbol_col    var column with gene symbols (default index).
+#   train_test_split_by obs column (e.g. donor_id) to hold out whole donors instead of single
+#                       cells — the default split gives optimistic metrics for new donors.
+#
+# Large references (hundreds of thousands of cells):
+#   train_max_cells_per_label: 2000              # downsample the training data per label
+#   train_celltypist_use_sgd: true               # SGD instead of the dense logistic regression
+#   train_celltypist_mini_batch: true            # needs train_celltypist_use_sgd

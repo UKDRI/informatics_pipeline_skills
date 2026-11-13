@@ -2,14 +2,17 @@
 name: nf-core_scdownstream
 description: >-
   Build SLURM job scripts + params.yml files for an nf-core:scdownstream run on the UKDRI cluster.
-  This is a SUBSTANTIALLY MODIFIED UKDRI fork with THREE sequential stages (--stage). Use when the user
-  wants single-cell downstream analysis (QC, doublet detection, integration, clustering, cell-type
-  annotation, marker genes, enrichment, cell-cell communication) or pseudobulk differential gene
-  expression per contrast with nf-core:scdownstream — triggers: "scdownstream", "nf-core
-  scdownstream", "single-cell downstream", "scvi integration", "celltypist", "cell type annotation",
-  "clustering", "qc_clustering", "downstream", "differential_genes", "differential expression",
-  "pseudobulk", "PyDESeq2", "DESeq2 per cell type", "contrasts", "condition", "treatment",
-  "sample metadata", plus "samplesheet", "h5ad", "params.yml", "slurm job".
+  This is a SUBSTANTIALLY MODIFIED UKDRI fork with FIVE stages (--stage): three sequential ones plus
+  model training and annotation. Use when the user wants single-cell downstream analysis (QC, doublet
+  detection, integration, clustering, cell-type annotation, marker genes, enrichment, cell-cell
+  communication), pseudobulk differential gene expression per contrast, training their own
+  CellTypist / scANVI cell type models on an annotated reference, or annotating an already processed
+  object with such models — triggers: "scdownstream", "nf-core scdownstream", "single-cell
+  downstream", "scvi integration", "scanvi", "reference mapping", "celltypist", "cell type
+  annotation", "annotate", "train a cell type model", "train_models", "clustering", "qc_clustering",
+  "downstream", "marker genes", "presto", "AUC", "COSG", "differential_genes", "differential
+  expression", "pseudobulk", "PyDESeq2", "DESeq2 per cell type", "contrasts", "condition",
+  "treatment", "sample metadata", plus "samplesheet", "h5ad", "params.yml", "slurm job".
   Produces files only; never runs the pipeline.
 ---
 
@@ -21,7 +24,7 @@ nf-core:scdownstream pipeline. This skill only produces files. The generated job
 **`slurm` skill** uses to transfer each stage to the HPC and submit it with `sbatch`.
 
 **This is a substantially modified UKDRI fork** (DESIGN.md §8), tracked on the **`dev_ukdri`** branch
-of <https://github.com/UKDRI/scdownstream> (version `0.0.1dev`, pinned commit `4c21ae8`). Its
+of <https://github.com/UKDRI/scdownstream> (version `0.0.1dev`, pinned commit `20bb8f0`). Its
 `main.nf` path and parameter set are **not** the stock upstream ones, so validate every parameter
 against the stored `assets/nextflow_schema.json` (the fork's schema) — not the public nf-core docs.
 UKDRI usage guidance lives at the wiki:
@@ -32,8 +35,10 @@ UKDRI usage guidance lives at the wiki:
   (`manifest.nextflowVersion = '!>=25.10.0'`, needed by nf-schema 2.7.3). The job runs the command in
   `<repo-root>/assets/cluster.json` (`nextflow`); Nextflow ≥ 26.04 parses the pipeline with its
   strict syntax parser, which this commit supports.
-- The deployed `/nfsdata/scripts/nf-core/dev/scdownstream/main.nf` must be at `4c21ae8` or later.
-  Before it, the per-sample QC columns (§3) and the contrast exclusions (§6) are read and silently
+- The deployed `/nfsdata/scripts/nf-core/dev/scdownstream/main.nf` must be at `20bb8f0` or later.
+  Before it there is no `--stage train_models` / `--stage annotate` (the run stops with "Invalid or
+  missing --stage"), and `downstream` still selects markers by `markers_thr_adj_pvalue` and rejects
+  the `markers_method` / `markers_min_auc` / COSG params the templates may now carry. Before `4c21ae8`, the per-sample QC columns (§3) and the contrast exclusions (§6) are read and silently
   **ignored**, and `min_genes`/`min_counts` are no floors under automatic filtering (§5). Before
   `325fa4e` the checkout does not parse under Nextflow 26.04's strict parser at all; under an older
   Nextflow it has no `--stage` param and, without the `-entry` the job scripts no longer pass, runs
@@ -41,25 +46,34 @@ UKDRI usage guidance lives at the wiki:
   "Deltas" below); before `e101d8c` it has no `differential_genes` stage, no `--metadata`, and
   writes the old output names.
 
-## 2. Three stages (§4.7)
-scdownstream runs as **three sequential stages**, selected with the required pipeline param
-**`--stage <name>`** — it replaces Nextflow's `-entry <name>`, which the strict syntax parser does
-not support. Each stage has its own job script and its own `params_<entry>.yml`; each consumes the
-previous stage's output `.h5ad` via `--base_adata`. `build_job.py --entry <name>` picks the stage,
+## 2. Five stages (§4.7)
+scdownstream runs as **three sequential stages** plus **two independent ones**, each selected with
+the required pipeline param **`--stage <name>`** — it replaces Nextflow's `-entry <name>`, which the
+strict syntax parser does not support. Each stage has its own job script and its own
+`params_<entry>.yml`; each sequential stage consumes the previous stage's output `.h5ad` via
+`--base_adata`. `build_job.py --entry <name>` picks the stage,
 and the job script passes `--stage <name>` on the command line — so `stage` is never written into a
 `params_<entry>.yml`; do not `--set stage=…` (a command-line `--stage` would override it anyway).
 
 | Stage | `--stage` / `--entry` | Required input | Writes into its `--outdir` (= `$resdir/out`) |
 |---|---|---|---|
-| 1 | `qc_clustering` | `--input` samplesheet.csv | `<NAME>_qc_clustering.h5ad` (+ `.rds`, QC/clustering report) |
-| 2 | `downstream` | `--base_adata` = stage 1 h5ad | `<NAME>_downstream.h5ad` (+ `.rds`, `<NAME>_downstream_markers.json.gz`, report) |
+| 1 | `qc_clustering` | `--input` samplesheet.csv | `<NAME>_qc_clustering.h5ad` (+ QC/clustering report, MultiQC) |
+| 2 | `downstream` | `--base_adata` = stage 1 h5ad (or an `annotate` h5ad) | `<NAME>_downstream.h5ad`, `<NAME>_downstream_markers.json.gz`, report |
 | 3 | `differential_genes` | `--base_adata` = stage 2 h5ad, plus `diffgenes_contrasts` | per group × contrast `differential_genes/deseq2/<group>/<NAME>_<group>_<contrast id>.tsv`, `<NAME>_differential_genes.json.gz`, `report/<NAME>_differential_genes_report.html` |
+| — | `train_models` | `--train_adata` = an annotated reference h5ad, plus `train_label_col` | `models/celltypist/<MODEL>.pkl`, `models/scanvi/<MODEL>/model.pt`, `models/scvi/<MODEL>/model.pt`, `models/<MODEL>_reference.h5ad`, `models/evaluation/`, `report/<MODEL>_training_report.html` |
+| — | `annotate` | `--base_adata` = a processed h5ad, plus a CellTypist and/or scANVI model | `<NAME>_annotate.h5ad`, `annotate/<NAME>_annotate_predictions.tsv`, `report/<NAME>_annotate_report.html` |
+
+No stage writes `.rds` files any more; to work in R, read the `.h5ad` with anndataR
+(`anndataR::read_h5ad(path, as = "SingleCellExperiment")` or `as = "Seurat"`) or zellkonverter.
+The two independent stages are covered in §7: `train_models` produces models that `qc_clustering`
+and `annotate` consume, and `annotate`'s output is a valid `--base_adata` for `downstream`.
 
 **`<NAME>` is the `name` param of that stage; unset, it falls back to `scdownstream`** (the fork's
 `conf/modules.config`: `"${params.name ?: 'scdownstream'}_<stage>"`) — except for the
 `differential_genes` DE tables and report, which fall back to `differential_genes` (`main.nf`),
 while its JSON still falls back to `scdownstream`. The templates seed `name`, so this only matters
-if it is removed. Stages 1 and 2 publish their `.h5ad`/`.rds` to the root of `--outdir`,
+if it is removed. `<MODEL>` (train_models) is `train_name`, falling back to `name`, then
+`reference`. Stages 1 and 2 (and `annotate`) publish their `.h5ad` to the root of `--outdir`,
 gzip-compressed, with `X`, every layer and `raw.X` stored as sparse CSR. Stage 3 writes its DE
 tables into `differential_genes/deseq2/<group>/` (one folder per `diffgenes_group_col` value) and
 its marker-gene JSON to the root of `--outdir`. Every stage's HTML report is in `report/`; the
@@ -71,7 +85,10 @@ pseudobulk `.h5ad`s are published only with `save_intermediates: true`.
 --input of stage N+1 = <stage N resdir>/out/<stage N name>_<stage N stage>.h5ad
 ```
 
-Ask the user for a short study name **once** and pass the same `--set name=<study>` to all three
+(`annotate` slots in the same way: qc_clustering → annotate → downstream uses
+`<annotate resdir>/out/<name>_annotate.h5ad` as downstream's input.)
+
+Ask the user for a short study name **once** and pass the same `--set name=<study>` to all
 stages, so both `--base_adata` paths are known before stage 1 has even run. The templates seed
 `name: scdownstream`, so without `--set name=` the files are `scdownstream_qc_clustering.h5ad` and
 `scdownstream_downstream.h5ad`.
@@ -99,6 +116,13 @@ stages, so both `--base_adata` paths are known before stage 1 has even run. The 
 - **`differential_genes`** — the stage 2 `<NAME>_downstream.h5ad` (it must hold a **`counts` layer**
   of raw counts; stage 1's normalisation step stores them there, so the pipeline's own outputs
   qualify — an object from elsewhere may not) and a **contrasts TSV** (§6).
+- **`train_models`** — an **annotated reference `.h5ad`** (e.g. a published atlas, or an earlier
+  scdownstream output with curated labels), and three facts about it that only the user knows: the
+  `obs` column with the labels, where its **raw** counts are (`X` or a layer), and ideally a donor
+  column to hold out (§7.1).
+- **`annotate`** — a **processed `.h5ad`** with raw counts in `layers["counts"]` (every scdownstream
+  output has them; without that layer `X` is used, and normalised data there gives wrong predictions
+  **without an error**), plus at least one model (§7.2).
 
 ## 4. Per-sample metadata (`qc_clustering` only) — ask, never assemble
 `--metadata` adds every column of a per-sample TSV to the cells' `obs`. Those columns are what
@@ -147,7 +171,7 @@ non-default parameters. The Python API validates every key/value against
 **qc_clustering:**
 ```bash
 python3 scripts/build_job.py --entry qc_clustering \
-    --species mouse \
+    --species human \
     --metadata /data/$USER/PROJECT/scdownstream/sample_metadata.tsv \
     --input  /data/$USER/PROJECT/scdownstream/samplesheet_scdownstream.csv \
     --resdir /data/$USER/PROJECT/scdownstream/qc_clustering \
@@ -158,7 +182,7 @@ python3 scripts/build_job.py --entry qc_clustering \
 **downstream** (input derived per §2):
 ```bash
 python3 scripts/build_job.py --entry downstream \
-    --species mouse \
+    --species human \
     --input /data/$USER/PROJECT/scdownstream/qc_clustering/out/study1_qc_clustering.h5ad \
     --resdir /data/$USER/PROJECT/scdownstream/downstream \
     --dest   /data/$USER/PROJECT/scdownstream/downstream \
@@ -184,8 +208,19 @@ Pass `--metadata <local metadata TSV>` here too to cross-check the contrasts aga
 - `downstream`: `name`, `selected_clustering` (`leiden_1.0`), `celltypist_model`.
 - `differential_genes`: `name`, `diffgenes_contrasts` (placeholder path — always replace),
   `diffgenes_group_col` (`leiden_1.0`), `diffgenes_sample_col` (`sample`).
+- `annotate`: `name`, `celltypist_model` (so the stage always has a model; replace or extend it
+  with the user's models, §7.2).
+- `train_models`: **nothing** — every value depends on the reference (§7.1). The build warns when
+  `train_label_col` (required) or `train_name` is unset.
 
-The shipped `celltypist_model` (`Mouse_Whole_Brain`) is mouse-specific: change it for human data.
+The shipped `celltypist_model` (`Adult_Human_PrefrontalCortex`, adult human dorsolateral prefrontal
+cortex) is human- and tissue-specific: change it for mouse data (e.g. `Mouse_Whole_Brain`) or other
+tissues — ask the user when the species or tissue differs.
+
+**Keep every analysis parameter in the params file — never move one onto the command line.** Under
+Nextflow 26 a command-line value reaches the pipeline as **text**: `--train_evaluate false` is the
+word `"false"`, which counts as *true*, and numbers are not numbers. The job scripts pass only
+`--stage`, the input path and `--outdir`; `--set` writes typed YAML.
 
 **Other `qc_clustering` options worth offering** (all off/default unless set):
 - `doublet_removal: true` — remove called doublets (by default they are only annotated);
@@ -207,10 +242,39 @@ The shipped `celltypist_model` (`Mouse_Whole_Brain`) is mouse-specific: change i
   `filtering_keep_outliers`.
 - `ambient_correction` now **defaults to `none`** (inputs are expected to be CellBender-corrected);
   set `decontx`/`cellbender`/`soupx`/`scar` only if they are not.
+- **Reference mapping / own models** (e.g. from `train_models`, §7.1):
+  `--set celltypist_model=<built-in>,<…>/models/celltypist/<MODEL>.pkl`,
+  `--set integration_methods=scvi,scanvi` and
+  `--set scanvi_model=<…>/models/scanvi/<MODEL>/model.pt` add `celltypist:<MODEL>` and
+  `scanvi:<MODEL>` (+ `:conf`) predictions, which can then be `selected_clustering` /
+  `diffgenes_group_col`. `scanvi_model` needs `scanvi`, and `scanvi` needs `scvi`, in
+  `integration_methods`; `scvi_query_max_epochs` (100) sets the fine-tuning epochs. `scanvi`
+  without `scanvi_model` trains scANVI on the samplesheet labels (`scanvi:labels`). scANVI cannot
+  be combined with a `--base_adata` extension — use `annotate` (§7.2) for an existing object.
+- `report_max_celltype_labels` (50) — the reports' "Predicted labels" UMAPs and tables show only
+  the top N CellTypist labels; raise it for models with many labels.
+
+**Marker genes (`downstream`)** — each group of `selected_clustering` vs all other cells, on the
+log-normalised `X`. Two methods, **both run by default** (`markers_method: presto,cosg`):
+- **`presto`** — Wilcoxon rank-sum test with the **AUC** (a Python port of R presto's `wilcoxauc`).
+  Markers are **selected and ranked by AUC**: `markers_min_auc` (0.7; 0.5 = no difference, 1 = a
+  perfect marker). p-values are still reported but no longer select markers (cluster-vs-rest
+  p-values are inflated), so **`markers_thr_adj_pvalue` is gone**.
+- **`cosg`** — the COSG specificity score (cosine similarity to an ideal marker; `markers_cosg_mu`,
+  default 1, penalises genes also expressed elsewhere). `markers_min_cosg_score` (0–1, unset)
+  filters by it; it is off by default because top scores vary a lot between clusters.
+- `markers_rank_by` — `auc` (default whenever presto runs: AUC → adj. p → log2FC → COSG) or `cosg`
+  (default with COSG only: COSG → log2FC → pct in). `auc` needs presto, `cosg` and
+  `markers_min_cosg_score` need cosg — the pipeline stops at launch otherwise.
+- `markers_pct_nz` (0.1), `markers_min_logfc` (0) and `markers_n_top` (100) still filter.
+- `--set markers_method=cosg` gives COSG only: no AUC, no p-values, `markers_min_auc` unused.
+- Offer `--set markers_rank_by=cosg` when the user wants the most **specific** genes per cluster
+  rather than the best-discriminating ones.
 
 **Marker-gene JSONs** (`downstream` and `differential_genes`). Both write a compact gene-set JSON
 to the root of `--outdir`: `<NAME>_downstream_markers.json.gz` (one set per cluster, id
-`genes--cluster--<cluster>`) and `<NAME>_differential_genes.json.gz` (per group value × contrast,
+`genes--cluster--<cluster>`, per gene `list_score` = the ranking metric, `list_logFC`, with presto
+`list_auc` / `list_p_value(_adjusted)`, with COSG `list_cosg_score`) and `<NAME>_differential_genes.json.gz` (per group value × contrast,
 `genes--<contrast id>--<group>--up` / `--down`, ranked by the Wald statistic; empty sets are
 dropped). `differential_genes` filters its sets with `diffgenes_markers_thr_adj_pvalue` (0.05),
 `diffgenes_markers_min_logfc` (0, absolute log2 FC) and `diffgenes_markers_n_top` (100 per set).
@@ -219,16 +283,22 @@ cluster value, group value or contrast id contains it** — leave it at `--` (th
 §6 never contain it); change it only via `--set markers_sep=<value>` in the params file.
 
 ### 5.1 `celltypist_model` value check
-`celltypist_model` is a free-text value checked (advisory, **warn — never error**) against
-`assets/celltypist_models.json`:
+`celltypist_model` is a **comma-separated list**; each entry is either a **built-in model name
+without `.pkl`** (downloaded at runtime) or a **local model file** — an entry **ending in `.pkl` or
+containing `/`**, e.g. a `train_models` output. Both can be mixed:
+`--set celltypist_model=Adult_Human_PrefrontalCortex,/data/$USER/PROJECT/train_models/out/models/celltypist/my_ref.pkl`.
+Predictions are written as `celltypist:<model>` (the name, or the file name without `.pkl`); two
+local files with the same file name cannot be used together. Use absolute paths for local files.
 
-1. a value containing a path separator `/` is treated as a **custom-model file path** and accepted
-   (no name check), e.g. `--set celltypist_model=/data/$USER/models/my_model.pkl`;
-2. otherwise a trailing `.pkl` is normalised and the name is matched against the known CellTypist
-   models (e.g. `Mouse_Whole_Brain`, `Human_Lung_Atlas`) — a match is a valid built-in model;
-3. an unknown name **warns** ("not in the CellTypist model list; for a custom model give a file
-   path instead") but the value **is still written** to `params_<entry>.yml`. The list is a
-   refreshable snapshot, so a legitimate-but-unlisted name is not an error.
+Each entry is checked (advisory, **warn — never error**) against `assets/celltypist_models.json`:
+
+1. an entry with `/` or ending in `.pkl` is a **local file** and is accepted without a name check —
+   but `Mouse_Whole_Brain.pkl` **warns**: the pipeline now reads it as a *file* named that (and stops
+   when it is not there), not as the built-in; drop the `.pkl`;
+2. any other entry is matched against the known CellTypist models (e.g. `Adult_Human_PrefrontalCortex`,
+   `Mouse_Whole_Brain`);
+3. an unknown name **warns** but the value **is still written** to `params_<entry>.yml`. The list
+   is a refreshable snapshot, so a legitimate-but-unlisted name is not an error.
 
 ## 6. Differential genes — contrasts and grouping
 Stage 3 sums the `counts` layer into **pseudobulk** profiles per `diffgenes_sample_col` ×
@@ -280,7 +350,7 @@ python3 scripts/contrasts.py build \
 
 **Grouping.** `diffgenes_group_col` decides what each DE analysis runs *within*: a clustering
 (`leiden_1.0`, the seeded value, matching downstream's `selected_clustering`) or a cell-type column
-(e.g. `celltypist:Mouse_Whole_Brain`, or `label`). `diffgenes_sample_col` is the biological sample —
+(e.g. `celltypist:Adult_Human_PrefrontalCortex`, or `label`). `diffgenes_sample_col` is the biological sample —
 keep `sample` (the pipeline always creates it) unless the user has a donor-level column that should
 be the replicate.
 
@@ -298,21 +368,117 @@ be the replicate.
   numbers; check cell-type labels if grouping by one. These live in the `.h5ad`, so no local check
   can see them.
 
-## 7. Fill the SLURM template
+## 7. Cell type models — `train_models` and `annotate`
+Two stages outside the qc_clustering → downstream → differential_genes sequence. Neither needs a
+species (no `--species`). Both use `-profile apptainer,gpu` (scVI / scANVI run on the GPU).
+
+### 7.1 `train_models` — train CellTypist and scANVI models on a reference
+Trains **CellTypist** (logistic regression on log-normalised counts) and **scANVI** (a scVI model,
+then scANVI initialised from it, on `train_hvgs` (5000) HVGs; architecture and epochs from the
+`scvi_*` params) — `train_methods: celltypist,scanvi` by default. Ask the user for:
+
+- the **label column** → `--set train_label_col=<column>` (**required**). Labels are used **exactly
+  as written** ("CD4+ T" and "CD4- T" stay two classes); only `train_unknown_label` (`unknown`) and
+  empty values are unlabelled. Labels with fewer than `train_min_cells_per_label` (50) cells are
+  dropped everywhere and listed in the report;
+- a **model name** → `--set train_name=<model>` (letters, digits, `_`, `-`): it names the files and
+  the prediction columns `celltypist:<model>` / `scanvi:<model>`;
+- where the **raw counts** are → `--set train_counts_layer=counts` for an scdownstream output
+  (default `X`; a warning is printed if they are not integers). Many published atlases keep
+  *normalised* data in `X` and the raw counts in `raw.X` or a layer — ask, don't assume;
+- the **batch** column (`train_batch_col`, default `batch`; one batch if missing) and, if gene
+  symbols are not the var index, `train_symbol_col`;
+- a **donor column** to hold out → `--set train_test_split_by=<column>`. **Recommend it:** by default
+  single cells are held out, so test cells share donors with training cells and the metrics are
+  optimistic for new donors.
+
+```bash
+python3 scripts/build_job.py --entry train_models \
+    --input  /data/$USER/PROJECT/scdownstream/reference/reference.h5ad \
+    --resdir /data/$USER/PROJECT/scdownstream/train_models \
+    --dest   /data/$USER/PROJECT/scdownstream/train_models \
+    --set train_label_col=cell_type --set train_name=my_ref \
+    --set train_counts_layer=counts --set train_test_split_by=donor_id
+```
+
+**Evaluation** (`train_evaluate: true`, default): `train_test_fraction` (0.25) of each label is held
+out, both models are trained on the rest and the test cells predicted (scANVI by query mapping, as
+`qc_clustering` uses it), giving accuracy, balanced accuracy, F1, per-label precision/recall and a
+confusion matrix. The final models are then **refit on all cells** (`train_final_on_all: true`);
+`false` keeps the training-split models. `train_evaluate: false` skips the evaluation.
+
+**Large references** (hundreds of thousands of cells; CellTypist's default holds a dense scaled
+copy): offer `--set train_max_cells_per_label=2000` (downsample the training data per label; the
+test set is not downsampled) and `--set train_celltypist_use_sgd=true
+--set train_celltypist_mini_batch=true` (`train_celltypist_batch_size`, 1000). `mini_batch` without
+`use_sgd` stops the run at launch.
+
+**Outputs** under `<resdir>/out/`: `models/celltypist/<MODEL>.pkl`, `models/scanvi/<MODEL>/model.pt`,
+`models/scvi/<MODEL>/model.pt`, `models/<MODEL>_reference.h5ad`, `models/evaluation/`
+(`<MODEL>_label_counts.tsv`, `<method>/<method>_{metrics,per_label,confusion}.tsv`) and
+`report/<MODEL>_training_report.html`. The models only work with the pipeline's tool versions
+(CellTypist 1.6.3, scvi-tools 1.3.3). Use them in `qc_clustering` (§5, "Reference mapping") or
+`annotate` (§7.2).
+
+### 7.2 `annotate` — add predictions to an already processed object
+Runs CellTypist and/or scANVI on an existing `.h5ad` (e.g. `<NAME>_qc_clustering.h5ad`) without
+re-running QC, integration or clustering. A method runs only when its model is given; **at least one
+is required** (the run stops at launch otherwise):
+
+- `celltypist_model` — built-in names and/or local `.pkl` files (§5.1). The template seeds
+  `Adult_Human_PrefrontalCortex`; replace it, or append the user's model so the report compares both;
+- `scanvi_model` — the path of a **`model.pt`** (any other file name stops the run); the columns are
+  named after its folder (`models/scanvi/my_ref/model.pt` → `scanvi:my_ref`).
+
+```bash
+python3 scripts/build_job.py --entry annotate \
+    --input  /data/$USER/PROJECT/scdownstream/qc_clustering/out/study1_qc_clustering.h5ad \
+    --resdir /data/$USER/PROJECT/scdownstream/annotate \
+    --dest   /data/$USER/PROJECT/scdownstream/annotate \
+    --set name=study1 \
+    --set celltypist_model=Adult_Human_PrefrontalCortex,/data/$USER/PROJECT/scdownstream/train_models/out/models/celltypist/my_ref.pkl \
+    --set scanvi_model=/data/$USER/PROJECT/scdownstream/train_models/out/models/scanvi/my_ref/model.pt
+```
+
+- **Raw counts are not checked.** They come from `layers["counts"]`, or `X` without that layer;
+  normalised or log data give **wrong predictions without an error**. Non-integer (SoupX/decontX)
+  counts are fine. Gene names must match the models' (usually symbols; `annotate_symbol_col` if
+  they are in a var column) — scANVI stops below 50 % of the model's genes, warns below 80 %.
+- **scANVI batches** come from `annotate_batch_col` (`batch`, one value per sample in scdownstream
+  output); for another object set it to its sample column. A model trained with
+  `scvi_*_covariates` needs the same `obs` columns.
+- **Subset** — `--set annotate_subset_col=leiden --set annotate_subset_values=3,7` annotates only
+  those cells (e.g. a microglia-state model on the microglia clusters). **The output then holds only
+  those cells**; UMAPs and clusters are not recomputed. Both params are needed together; values
+  containing a comma cannot be selected.
+- **Outputs**: `<NAME>_annotate.h5ad` (the input plus `celltypist:<model>` / `scanvi:<model>`
+  (+ `:conf`) columns and `obsm["X_scanvi_<model>"]`; re-annotating with a model of the same name
+  replaces its columns), `annotate/<NAME>_annotate_predictions.tsv`, and
+  `report/<NAME>_annotate_report.html` (label counts, confidences, method agreement, labels per
+  Leiden cluster and per sample).
+- **Continuing**: `<NAME>_annotate.h5ad` is a valid `downstream` input, e.g. with
+  `--set selected_clustering=scanvi:my_ref` (and then `diffgenes_group_col` in stage 3). Cell-type
+  labels used as groups must not contain `markers_sep` (`--`, §6).
+- A cell type missing from the reference still gets the closest reference label, usually with a
+  lower `:conf` — tell the user to check low-confidence cells.
+
+## 8. Fill the SLURM template
 `build_job.py` also writes the filled job script into `--dest`: the input-path line
-(`samplesheet=` for `qc_clustering`, `h5adf=` for the other two) and the `resdir=` line are set from
-`--input`/`--resdir`, and `exec=`/`main=` from `<repo-root>/assets/cluster.json` (the dev `main.nf`,
-`/nfsdata/scripts/nf-core/dev/scdownstream/main.nf`). All three place `--stage <name>` first and
-reference `params_<entry>.yml` — never `-entry`, which this fork no longer supports. `qc_clustering` and `downstream` use
-`-profile apptainer,gpu`; `differential_genes` uses `-profile apptainer` (none of its processes use a
-GPU). Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run.
+(`samplesheet=` for `qc_clustering`, `h5adf=` for the other four) and the `resdir=` line are set
+from `--input`/`--resdir`, and `exec=`/`main=` from `<repo-root>/assets/cluster.json` (the dev
+`main.nf`, `/nfsdata/scripts/nf-core/dev/scdownstream/main.nf`). All five place `--stage <name>`
+first and reference `params_<entry>.yml` — never `-entry`, which this fork no longer supports. The
+input flag is `--input` (qc_clustering), `--train_adata` (train_models) or `--base_adata` (the
+other three). `qc_clustering`, `downstream`, `train_models` and `annotate` use
+`-profile apptainer,gpu`; `differential_genes` uses `-profile apptainer` (none of its processes use
+a GPU). Confirm the `#SBATCH --time`/`--cpus-per-task` suit the run.
 
 **No GPU on the cluster?** Change `-profile apptainer,gpu` to `-profile apptainer` in the
-`qc_clustering` and `downstream` scripts. The `process_gpu` steps (e.g. scVI) then run on CPU, because
+`qc_clustering`, `downstream`, `train_models` and `annotate` scripts. The `process_gpu` steps (e.g. scVI) then run on CPU, because
 `base.config` sets `ext.use_gpu`/`accelerator` from `workflow.profile.contains('gpu')`. They are slower,
 so allow more `#SBATCH --time`.
 
-## 8. Custom-config recommendations
+## 9. Custom-config recommendations
 - **Large datasets (> 250,000 cells):** bump the per-process memory limit to `225.GB` via a custom
   process-resource config (DESIGN.md §4.6). The `#SBATCH` header sizes only the Nextflow driver job;
   a `-c` config sizes the individual per-process cluster jobs that actually do the work. Generate one
@@ -325,15 +491,22 @@ so allow more `#SBATCH --time`.
   script has a commented `-c $conf` line ready to uncomment). Alternatively point `conf=` at your own
   `custom.config`. See `assets/base.config` for the default per-process resources and the valid
   `withName`/`withLabel` selectors.
+- **Large training references (`train_models`):** reach for `train_max_cells_per_label` and the
+  CellTypist SGD options first (§7.1) — they cut memory at the source; a memory bump is the fallback.
 
-## 9. Hand back
+## 10. Hand back
 Tell the user the paths of the generated `run_nfcore_scdownstream_<entry>.sh` and
 `params_<entry>.yml` files, and that the **`slurm` skill** submits each stage: it transfers a stage's
-script with its `params_<entry>.yml` (and `sample_metadata.tsv` / `contrasts.tsv` where they are not
-yet on the cluster) and runs `sbatch` from that directory. The stages are **sequential**. Because
-every `--base_adata` path is derived in advance (§2), all three can be submitted in one sitting with
-the `slurm` skill's `submit --after-ok <previous job id>`: each stage starts only if the one before
-it succeeded. Submitting one at a time after `job_status` reports completion, or running each
+script with its `params_<entry>.yml` (and `sample_metadata.tsv` / `contrasts.tsv` / a training
+reference `.h5ad` / local `.pkl` models where they are not yet on the cluster) and runs `sbatch`
+from that directory. The three main stages are **sequential**. Because every `--base_adata` path is
+derived in advance (§2), they can be submitted in one sitting with the `slurm` skill's
+`submit --after-ok <previous job id>`: each stage starts only if the one before it succeeded. The
+same holds for chains through the independent stages — `train_models` → `qc_clustering` /
+`annotate` (the model paths `models/celltypist/<MODEL>.pkl` and `models/scanvi/<MODEL>/model.pt`
+under its `$outdir` are known from `train_name`), and `qc_clustering` → `annotate` → `downstream`.
+Say plainly that those paths do not exist yet and were not checked: the pipeline checks a local
+`.pkl` and the `model.pt` when the dependent stage launches. Submitting one at a time after `job_status` reports completion, or running each
 `sbatch` by hand, is equally fine. Never submit the jobs yourself from this skill.
 
 ## Species selection
@@ -341,7 +514,8 @@ it succeeded. Submitting one at a time after `job_status` reports completion, or
 default is `human`, so `--species human` leaves it at its default; `--species mouse` writes
 `species: mouse`). For `downstream` it also fills **`ortholog_hcop_directory`** — the HCOP ortholog
 tables LIANA+ needs for non-human data, which no longer has a pipeline default — from the shared
-`<repo-root>/assets/genomes.json`. `differential_genes` needs no species.
+`<repo-root>/assets/genomes.json`. `differential_genes`, `train_models` and `annotate` need no
+species (the `--species` flag is accepted there but fills nothing).
 
 **A species is required for stages 1 and 2.** The templates deliberately do **not** seed `species`,
 so if none can be resolved the build hard-errors instead of silently running mouse data as human.
@@ -352,17 +526,20 @@ cannot be scanned: pass `--species` (or `--metadata file.tsv`). Scientific names
 *Mus musculus* / *Homo sapiens* are recognised; a file mixing species is not auto-selected.
 
 ## Deltas from upstream nf-core/scdownstream (DESIGN.md §8)
-- Three stages instead of one pass, selected with the **required** `--stage
-  qc_clustering|downstream|differential_genes` (since `325fa4e`; it replaces `-entry`, which
-  Nextflow 26.04's strict syntax parser does not support). Without a valid `--stage` the run stops
-  before any task; `--help` / `--help_full` run no stage.
+- Five stages instead of one pass, selected with the **required** `--stage
+  qc_clustering|downstream|differential_genes|train_models|annotate` (since `325fa4e`; it replaces
+  `-entry`, which Nextflow 26.04's strict syntax parser does not support; `train_models` and
+  `annotate` since `20bb8f0`). Without a valid `--stage` the run stops before any task; `--help` /
+  `--help_full` run no stage.
 - Minimum Nextflow raised from 24.10.5 to **25.10.0** (nf-schema 2.4.2 → 2.7.3); the pipeline
   parses under Nextflow 26.04's strict parser without `NXF_SYNTAX_PARSER=v1`.
 - Params added since the previous pin (`3009f37`): `metadata`, `metadata_sample_col`,
   `diffgenes_*`, `doublet_removal`, `filtering_keep_outliers`, `pca_n_comps`, `neighbors_n_pcs`,
   `umap_for_plots`, `umap_color_by`, `umap_color_by_embeddings`; since `e101d8c`: `markers_sep`,
   `diffgenes_markers_n_top`, `diffgenes_markers_thr_adj_pvalue`, `diffgenes_markers_min_logfc`;
-  since `6ae8cd9`: `stage`.
+  since `6ae8cd9`: `stage`; since `20bb8f0`: `markers_method`, `markers_rank_by`,
+  `markers_min_auc`, `markers_cosg_mu`, `markers_min_cosg_score`, `report_max_celltype_labels`,
+  `scvi_query_max_epochs`, `train_*` (§7.1) and `annotate_*` (§7.2).
 - Removed (since `6ae8cd9`): SingleR / celldex cell type annotation and its `celldex_reference`
   param — cell type annotation is CellTypist only. `build_job.py` now rejects `celldex_reference`
   as an unknown key; the `test_offline` profile is gone too.
@@ -371,6 +548,18 @@ cannot be scanned: pass `--species` (or `--metadata file.tsv`). Scientific names
   `prep_cellxgene` (the published h5ad opens in cellxgene directly) and the config-only
   `skip_enrichment` (enrichment always runs in `downstream`). `build_job.py` rejects them as unknown
   keys.
+- Removed (since `20bb8f0`): `markers_thr_adj_pvalue` (markers are selected by AUC, §5), SCimilarity
+  (`scimilarity_model`, and `scimilarity` in `integration_methods`) and the inactive `pseudobulk`,
+  `pseudobulk_groupby_labels`, `pseudobulk_min_num_cells`. `build_job.py` rejects them as unknown
+  keys. The `SCANPY_RANKGENESGROUPS` module is gone (presto/COSG replace it).
+- Since `20bb8f0`: **no `.rds` outputs** (ADATA_TORDS removed; read the h5ad with anndataR or
+  zellkonverter). `celltypist_model` entries ending in `.pkl` or containing `/` are **local model
+  files** (§5.1). scANVI reference mapping works in `qc_clustering` (`scanvi:<model>` columns,
+  `obsm["X_scanvi"]`); with `--base_adata` it stops ("not supported yet"). The downstream marker
+  JSON gained `list_auc` / `list_cosg_score`, and `list_score` is now the ranking metric. The
+  reports' marker, enrichment and LIANA+ tables are sortable and the marker tables filterable.
+  Containers: `nhecker/scanpy-ukdri-suite:1.11.4-1` and `nhecker/seurat-ukdri-suite:5.5.1-1`
+  replace the per-tool images (first run on the cluster pulls them into the apptainer cache).
 - Since `325fa4e`: the samplesheet's per-sample QC columns take effect (new `max_genes`,
   `max_counts`; before they were read and ignored), and so do the contrasts' `exclude_samples_col` /
   `exclude_samples_values` (§6). **Behaviour change:** with `automatic_cell_filtering`,
@@ -386,4 +575,6 @@ cannot be scanned: pass `--species` (or `--metadata file.tsv`). Scientific names
   `integrated_scvi_finalized.h5ad` (§2).
 - Custom modules: ADATA_ADDSAMPLE / ADATA_ADDMETADATA (sample and metadata columns), decoupler
   pseudobulk, PyDESeq2 per contrast, PYDESEQ2_EXPORT_MARKERS (the differential-genes JSON), Quarto
-  reports per stage, ADATA_PUBLISH (gzip, sparse-CSR stage outputs).
+  reports per stage, ADATA_PUBLISH (gzip, sparse-CSR stage outputs), MARKERS_PRESTO / MARKERS_COSG,
+  and the train_models (ADATA_TRAINSPLIT, CELLTYPIST_TRAIN, MODEL_EVALUATE) and annotate
+  (ADATA_PREPANNOTATE) modules.

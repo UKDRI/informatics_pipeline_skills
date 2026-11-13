@@ -1,0 +1,23 @@
+# params.yml — nf-core:scdownstream (entry: annotate)
+# Only parameters that differ from the pipeline defaults (see ../assets/nextflow.config).
+# Adds cell type predictions from pre-trained models to an already processed object, without
+# re-running QC, integration or clustering. No species is needed.
+#
+# At least ONE model is required: celltypist_model and/or scanvi_model.
+#   celltypist_model - comma-separated built-in names (no .pkl) and/or local model files (an
+#                      entry ending in .pkl or containing '/'), e.g. a train_models output:
+#                      Adult_Human_PrefrontalCortex,/data/$USER/PROJECT/train_models/out/models/celltypist/ref.pkl
+#   scanvi_model     - the path of a scANVI model.pt (the columns are named after its folder),
+#                      e.g. /data/$USER/PROJECT/train_models/out/models/scanvi/ref/model.pt
+#
+# `name` prefixes the outputs (<name>_annotate.h5ad, annotate/<name>_annotate_predictions.tsv,
+# report/<name>_annotate_report.html). <outdir>/<name>_annotate.h5ad is a valid --base_adata for
+# the downstream stage. Use the SAME name as the other stages (--set name=<study>).
+# NOTE: celltypist_model below is HUMAN-specific (adult prefrontal cortex) — change it
+#       for mouse data (e.g. Mouse_Whole_Brain) or other tissues.
+name: scdownstream
+celltypist_model: Adult_Human_PrefrontalCortex
+# Optional (pipeline defaults shown, so not written unless changed):
+#   annotate_batch_col: batch     # obs column of the query batches (one per sample in scdownstream output)
+#   annotate_symbol_col: index    # var column with gene symbols, if they are not the var index
+#   annotate_subset_col / annotate_subset_values: annotate only these cells, e.g. leiden + "3,7"
